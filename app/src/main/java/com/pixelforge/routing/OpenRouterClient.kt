@@ -9,6 +9,7 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 import io.ktor.serialization.gson.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.cancellation.CancellationException
 
@@ -33,20 +34,24 @@ class OpenRouterClient(
         val model: String,
         val messages: List<ChatMessage>,
         val temperature: Double = 0.7,
-        val max_tokens: Int = 2048
+        val max_tokens: Int = 4096
     )
-    data class Choice(val message: ChatMessage?)
+    data class Choice(val message: ChatMessage?, val finish_reason: String? = null)
     data class ChatResponse(val choices: List<Choice>?)
 
     suspend fun chat(systemPrompt: String, userPrompt: String): String {
         var lastError = "tidak ada model"
         for (model in models) {
-            try {
-                return call(model, systemPrompt, userPrompt)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                lastError = "$model → ${e.message ?: e.javaClass.simpleName}"
+            // Tiap model dicoba hingga 3x dengan jeda (rate limit / respons kosong sering sementara)
+            for (attempt in 1..3) {
+                try {
+                    return call(model, systemPrompt, userPrompt)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastError = "$model → ${e.message ?: e.javaClass.simpleName}"
+                    if (attempt < 3) delay(2000L * attempt)
+                }
             }
         }
         error("Semua model gagal. Terakhir: $lastError")
@@ -69,9 +74,9 @@ class OpenRouterClient(
             if (!response.status.isSuccess()) {
                 error("HTTP ${response.status.value}: ${response.bodyAsText().take(160)}")
             }
-            response.body<ChatResponse>().choices?.firstOrNull()?.message?.content
-                ?.takeIf { it.isNotBlank() }
-                ?: error("respons kosong")
+            val choice = response.body<ChatResponse>().choices?.firstOrNull()
+            choice?.message?.content?.takeIf { it.isNotBlank() }
+                ?: error("respons kosong (finish=${choice?.finish_reason ?: "?"})")
         }
 
     fun close() = client.close()

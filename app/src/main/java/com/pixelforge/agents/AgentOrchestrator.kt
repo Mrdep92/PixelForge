@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlin.coroutines.cancellation.CancellationException
 
 typealias LlmCall = suspend (systemPrompt: String, userPrompt: String) -> String
@@ -17,6 +19,9 @@ typealias LlmCall = suspend (systemPrompt: String, userPrompt: String) -> String
  * Posisi agent berupa pecahan 0..1 dari ukuran kantor supaya pas di semua ukuran layar.
  */
 class AgentOrchestrator {
+
+    // Batasi panggilan LLM bersamaan supaya tidak kena rate limit OpenRouter
+    private val llmGate = Semaphore(2)
 
     private val _agents = MutableStateFlow(createDefaultAgents())
     val agents: StateFlow<List<Agent>> = _agents.asStateFlow()
@@ -67,12 +72,14 @@ class AgentOrchestrator {
         val approvals = coroutineScope {
             roles.map { role ->
                 async {
-                    val report = llmCall(
-                        "You are the ${role.name} agent. Give a very short report (2-4 sentences) " +
-                            "of what you will do based on this plan:\n$planText\n" +
-                            "Reply in the same language as the user's command.",
-                        "Command: $command\nKeep it under 80 words."
-                    )
+                    val report = llmGate.withPermit {
+                        llmCall(
+                            "You are the ${role.name} agent. Give a very short report (2-4 sentences) " +
+                                "of what you will do based on this plan:\n$planText\n" +
+                                "Reply in the same language as the user's command.",
+                            "Command: $command\nKeep it under 80 words."
+                        )
+                    }
                     ApprovalRequest(
                         taskPlanId = plan.id,
                         agentId = _agents.value.first { it.role == role }.id,
@@ -106,14 +113,14 @@ class AgentOrchestrator {
             approvals.map { a ->
                 async {
                     try {
-                        val out = llmCall(
+                        val out = llmGate.withPermit { llmCall(
                             "You are the ${a.agentRole.name} agent in PixelForge.\n" +
                                 "Project Bible (follow strictly):\n$projectBible\n" +
                                 "Reply in the same language as the user's command.",
                             "User command: ${plan.userCommand}\n\nApproved plan:\n${plan.architectPlan}\n\n" +
                                 "Your report: ${a.report}\n\n" +
                                 "Now do your part. Deliver the concrete output (code, findings, or text)."
-                        )
+                        ) }
                         onResult(a.agentRole, out)
                         setStatus(a.agentRole, AgentStatus.DONE, "Selesai ✓")
                     } catch (e: CancellationException) {
