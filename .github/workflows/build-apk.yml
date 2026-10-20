@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,3 +30,13 @@ jobs:
         with:
           name: PixelForge-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish APK to Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk PixelForge.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest PixelForge.apk \
+            --title "PixelForge (latest build)" \
+            --notes "Debug APK dari commit ${GITHUB_SHA::7}. Unduh PixelForge.apk lalu install."
