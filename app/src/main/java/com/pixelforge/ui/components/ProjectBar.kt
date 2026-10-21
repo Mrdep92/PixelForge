@@ -69,7 +69,14 @@ fun ProjectBar(vm: MainViewModel) {
                 )
             }
         }
-        TextButton(onClick = { showEdit = true }, enabled = !busy) { Text("✎ Repo") }
+        TextButton(
+            onClick = { showEdit = true },
+            enabled = !busy,
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = Color(0xFF00E5FF),
+                disabledContentColor = Color.Gray
+            )
+        ) { Text("✎ Repo") }
     }
 
     if (showNew) NewProjectDialog(
