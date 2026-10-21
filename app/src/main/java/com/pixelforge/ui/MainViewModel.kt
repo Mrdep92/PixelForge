@@ -12,13 +12,18 @@ import com.pixelforge.core.StateStore
 import com.pixelforge.data.local.entity.MessageEntity
 import com.pixelforge.data.local.entity.ProjectBibleEntity
 import com.pixelforge.data.local.entity.ProjectEntity
+import com.pixelforge.domain.model.Agent
 import com.pixelforge.domain.model.AgentRole
+import com.pixelforge.domain.model.AgentStatus
+import com.pixelforge.domain.model.ApprovalRequest
+import com.pixelforge.domain.model.TaskPlan
 import com.pixelforge.github.GitHubClient
 import com.pixelforge.github.GitHubException
 import com.pixelforge.routing.LlmExhaustedException
 import com.pixelforge.routing.LlmRouter
 import com.pixelforge.routing.Provider
 import com.pixelforge.workspace.Workspace
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -33,8 +38,6 @@ data class SettingsState(
     val omniModel: String,
     val hasOmniKey: Boolean,
     val omniFirst: Boolean,
-    val ghRepo: String,
-    val ghBranch: String,
     val hasGhToken: Boolean,
     val bible: String
 )
@@ -48,12 +51,13 @@ data class SettingsForm(
     val omniModel: String,
     val omniFirst: Boolean,
     val ghToken: String,
-    val ghRepo: String,
-    val ghBranch: String,
     val bible: String
 )
 
-/** Progres fase build/debug di GitHub, disimpan supaya bisa dilanjutkan. */
+/** Repo GitHub milik satu project. */
+data class ProjectMeta(val repo: String = "", val branch: String = "main")
+
+/** Progres fase build/debug di GitHub, disimpan per project supaya bisa dilanjutkan. */
 data class CiState(
     val pending: Boolean = false,
     val debugLog: String? = null,
@@ -61,22 +65,41 @@ data class CiState(
     val fixed: Boolean = false
 )
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val pf = app as PixelForgeApp
     private val db = pf.db
     private val store = pf.store
     private val stateStore = StateStore(app)
-    private val workspace = Workspace(app)
-    private val orchestrator = AgentOrchestrator(stateStore)
 
-    val agents = orchestrator.agents
-    val approvals = orchestrator.pendingApprovals
-    val unfinished = orchestrator.unfinished
-    val plan = orchestrator.currentPlan
+    // ---------- Project aktif: tiap project punya orchestrator, workspace, chat, bible, repo sendiri ----------
 
-    val messages: StateFlow<List<MessageEntity>> = db.messageDao().getMessages(PROJECT_ID)
-        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val _projectId = MutableStateFlow(stateStore.load("current_project", String::class.java) ?: PROJECT_ID)
+    val projectId = _projectId.asStateFlow()
+
+    private val orchestrators = mutableMapOf<String, AgentOrchestrator>()
+    private val workspaces = mutableMapOf<String, Workspace>()
+    private fun orchFor(id: String): AgentOrchestrator = orchestrators.getOrPut(id) { AgentOrchestrator(stateStore, id) }
+    private fun wsFor(id: String): Workspace = workspaces.getOrPut(id) { Workspace(getApplication<Application>(), id) }
+    private val orchestrator: AgentOrchestrator get() = orchFor(_projectId.value)
+    private val workspace: Workspace get() = wsFor(_projectId.value)
+
+    val projects: StateFlow<List<ProjectEntity>> =
+        db.projectDao().getAllProjects().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val agents: StateFlow<List<Agent>> = _projectId.flatMapLatest { orchFor(it).agents }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, orchFor(_projectId.value).agents.value)
+    val approvals: StateFlow<List<ApprovalRequest>> = _projectId.flatMapLatest { orchFor(it).pendingApprovals }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, orchFor(_projectId.value).pendingApprovals.value)
+    val unfinished: StateFlow<List<ApprovalRequest>> = _projectId.flatMapLatest { orchFor(it).unfinished }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, orchFor(_projectId.value).unfinished.value)
+    val plan: StateFlow<TaskPlan?> = _projectId.flatMapLatest { orchFor(it).currentPlan }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, orchFor(_projectId.value).currentPlan.value)
+
+    val messages: StateFlow<List<MessageEntity>> =
+        _projectId.flatMapLatest { db.messageDao().getMessages(it) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _bible = MutableStateFlow(DEFAULT_BIBLE)
     private val _busy = MutableStateFlow(false)
@@ -85,14 +108,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _settings = MutableStateFlow(readSettings())
     val settings = _settings.asStateFlow()
 
-    private val _files = MutableStateFlow(workspace.list())
+    private val _meta = MutableStateFlow(loadMeta(_projectId.value))
+    val meta = _meta.asStateFlow()
+
+    private val _files = MutableStateFlow(wsFor(_projectId.value).list())
     val files = _files.asStateFlow()
 
-    private val _ci = MutableStateFlow(stateStore.load("ci", CiState::class.java) ?: CiState())
+    private val _ci = MutableStateFlow(loadCi(_projectId.value))
 
     /** Ada pekerjaan yang terhenti (agent tertunda / build-debug belum selesai) dan bisa dilanjutkan. */
     val canResume: StateFlow<Boolean> =
-        combine(orchestrator.unfinished, _ci) { u, c -> u.isNotEmpty() || c.pending }
+        combine(unfinished, _ci) { u, c -> u.isNotEmpty() || c.pending }
             .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     init {
@@ -101,9 +127,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (db.projectDao().getProject(PROJECT_ID) == null) {
                 db.projectDao().insert(ProjectEntity(PROJECT_ID, "My Project", "", now, now, true))
                 db.bibleDao().upsert(ProjectBibleEntity(PROJECT_ID, DEFAULT_BIBLE, now))
-                post("SYSTEM", "system", "Selamat datang di PixelForge. Isi API key di tab Settings, lalu beri perintah — tim akan membuat rencana dulu dan menunggu persetujuanmu.")
+                post("SYSTEM", "system", "Selamat datang di PixelForge. Isi API key di tab Settings, lalu beri perintah — tim akan membuat rencana dulu dan menunggu persetujuanmu.", null, PROJECT_ID)
             }
-            _bible.value = db.bibleDao().get(PROJECT_ID)?.content ?: DEFAULT_BIBLE
+            // Migrasi dari versi lama: repo global → repo milik project pertama
+            if (stateStore.load("meta:$PROJECT_ID", ProjectMeta::class.java) == null && store.ghRepo.isNotBlank()) {
+                stateStore.save("meta:$PROJECT_ID", ProjectMeta(store.ghRepo, store.ghBranch))
+                if (_projectId.value == PROJECT_ID) _meta.value = loadMeta(PROJECT_ID)
+            }
+            _bible.value = db.bibleDao().get(_projectId.value)?.content ?: DEFAULT_BIBLE
             _settings.value = readSettings()
         }
         viewModelScope.launch {
@@ -111,6 +142,100 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 delay(3000)
                 orchestrator.idleTick()
             }
+        }
+    }
+
+    // ---------- Kelola project ----------
+
+    private fun loadMeta(id: String): ProjectMeta =
+        stateStore.load("meta:$id", ProjectMeta::class.java) ?: ProjectMeta()
+
+    private fun loadCi(id: String): CiState =
+        stateStore.load("ci:$id", CiState::class.java)
+            ?: (if (id == PROJECT_ID) stateStore.load("ci", CiState::class.java) else null)
+            ?: CiState()
+
+    private fun setMeta(m: ProjectMeta) {
+        _meta.value = m
+        stateStore.save("meta:${_projectId.value}", m)
+    }
+
+    private fun projectName(): String =
+        projects.value.firstOrNull { it.id == _projectId.value }?.name ?: "project"
+
+    /** Tidak bisa pindah project saat agent sedang bekerja (supaya hasil tidak nyasar ke project lain). */
+    fun switchProject(id: String) {
+        if (_busy.value || id == _projectId.value) return
+        _projectId.value = id
+        stateStore.save("current_project", id)
+        _meta.value = loadMeta(id)
+        _ci.value = loadCi(id)
+        _files.value = wsFor(id).list()
+        viewModelScope.launch {
+            _bible.value = db.bibleDao().get(id)?.content ?: DEFAULT_BIBLE
+            _settings.value = readSettings()
+        }
+    }
+
+    fun createProject(name: String, repoName: String, autoRepo: Boolean, isPrivate: Boolean) {
+        val n = name.trim()
+        if (n.isEmpty() || _busy.value) return
+        viewModelScope.launch {
+            val id = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            db.projectDao().insert(ProjectEntity(id, n, "", now, now, true))
+            val bible = DEFAULT_BIBLE.replace("(Tulis tujuan proyekmu di sini)", "Project \"$n\" — (tulis tujuan di sini)")
+            db.bibleDao().upsert(ProjectBibleEntity(id, bible, now))
+            stateStore.save("meta:$id", ProjectMeta(if (autoRepo) "" else repoName.trim(), "main"))
+            switchProject(id)
+            post("SYSTEM", "system", "📁 Project \"$n\" dibuat. Beri perintah di tab Chat.")
+            if (autoRepo) doCreateRepo(repoName.ifBlank { n }, isPrivate)
+        }
+    }
+
+    fun updateRepo(repo: String, branch: String) {
+        if (_busy.value) return
+        setMeta(ProjectMeta(repo.trim().removePrefix("https://github.com/").trim('/'), branch.trim().ifBlank { "main" }))
+    }
+
+    /** Agent Repo: membuat repo GitHub untuk project aktif. */
+    fun createRepo(repoName: String, isPrivate: Boolean) {
+        if (_busy.value) return
+        viewModelScope.launch { doCreateRepo(repoName.ifBlank { projectName() }, isPrivate) }
+    }
+
+    private fun slug(s: String): String {
+        val x = s.lowercase().replace(Regex("[^a-z0-9._-]+"), "-").trim('-', '.')
+        return x.ifBlank { "pixelforge-project" }.take(80)
+    }
+
+    private suspend fun doCreateRepo(repoName: String, isPrivate: Boolean) {
+        val token = store.ghToken
+        if (token.isBlank()) {
+            post("SYSTEM", "system", "⚠ Isi token GitHub di Settings dulu supaya agent Repo bisa membuat repo.")
+            return
+        }
+        _busy.value = true
+        val orch = orchestrator
+        orch.announce(AgentRole.REPO, AgentStatus.WORKING, "Membuat repo...")
+        val name = slug(repoName)
+        val gh = GitHubClient(token, "", "main")
+        try {
+            post("SYSTEM", "system", "🏗 Agent Repo membuat repo \"$name\" (${if (isPrivate) "privat" else "publik"})...")
+            val info = gh.createRepo(name, "Dibuat oleh PixelForge — ${projectName()}", isPrivate)
+            setMeta(ProjectMeta(info.fullName, info.defaultBranch))
+            post("AGENT", "assistant", "Repo siap: ${info.url}\nBranch: `${info.defaultBranch}`. Agent akan commit ke repo ini.", "REPO")
+            orch.announce(AgentRole.REPO, AgentStatus.DONE, "Repo siap ✓")
+            delay(4000)
+            orch.announce(AgentRole.REPO, AgentStatus.IDLE, null)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            post("SYSTEM", "system", "⚠ ${e.message}")
+            orch.announce(AgentRole.REPO, AgentStatus.IDLE, null)
+        } finally {
+            gh.close()
+            _busy.value = false
         }
     }
 
@@ -123,8 +248,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         omniModel = store.omniModel,
         hasOmniKey = store.omniKey.isNotBlank(),
         omniFirst = store.omniFirst,
-        ghRepo = store.ghRepo,
-        ghBranch = store.ghBranch,
         hasGhToken = store.ghToken.isNotBlank(),
         bible = _bible.value
     )
@@ -137,12 +260,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         store.omniModel = f.omniModel
         store.omniFirst = f.omniFirst
         if (f.ghToken.isNotBlank()) store.ghToken = f.ghToken
-        store.ghRepo = f.ghRepo
-        store.ghBranch = f.ghBranch
         _bible.value = f.bible
         _settings.value = readSettings()
+        val pid = _projectId.value
         viewModelScope.launch {
-            db.bibleDao().upsert(ProjectBibleEntity(PROJECT_ID, f.bible, System.currentTimeMillis()))
+            db.bibleDao().upsert(ProjectBibleEntity(pid, f.bible, System.currentTimeMillis()))
         }
     }
 
@@ -184,7 +306,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _busy.value = true
             val router = LlmRouter(providers)
             try {
-                val p = orchestrator.submitCommand(PROJECT_ID, text, fullContext()) { s, u -> router.chat(s, u) }
+                val p = orchestrator.submitCommand(_projectId.value, text, fullContext()) { s, u -> router.chat(s, u) }
                 post("AGENT", "assistant", p.architectPlan, "ARCHITECT")
                 post("SYSTEM", "system", "Rencana siap. Buka tab Approvals untuk menyetujui atau menolak.")
             } catch (e: CancellationException) {
@@ -282,14 +404,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun setCi(c: CiState) {
         _ci.value = c
-        stateStore.save("ci", c)
+        stateStore.save("ci:${_projectId.value}", c)
     }
 
     private suspend fun runCi(router: LlmRouter) {
         val token = store.ghToken
-        val repo = store.ghRepo
+        val repo = _meta.value.repo
+        val branch = _meta.value.branch
         if (token.isBlank() || repo.isBlank()) {
-            post("SYSTEM", "system", "ℹ GitHub belum diatur — file tersimpan di tab Files. Isi Settings → GitHub untuk commit & build otomatis.")
+            post("SYSTEM", "system", "ℹ Project ini belum punya repo/token GitHub — file tersimpan di tab Files. Atur repo lewat tombol ✎ di bar project (atau minta agent Repo membuatnya), dan isi token di Settings.")
             setCi(CiState())
             return
         }
@@ -297,7 +420,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             setCi(CiState())
             return
         }
-        val gh = GitHubClient(token, repo, store.ghBranch)
+        val gh = GitHubClient(token, repo, branch)
         try {
             var log = _ci.value.debugLog
             var attempt = _ci.value.attempt
@@ -375,11 +498,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** type: USER | AGENT | SYSTEM. Untuk AGENT, kolom agentId diisi nama role (mis. CODER). */
-    private suspend fun post(type: String, role: String, content: String, agentRole: String? = null) {
+    private suspend fun post(
+        type: String,
+        role: String,
+        content: String,
+        agentRole: String? = null,
+        pid: String = _projectId.value
+    ) {
         db.messageDao().insert(
             MessageEntity(
                 id = UUID.randomUUID().toString(),
-                projectId = PROJECT_ID,
+                projectId = pid,
                 agentId = agentRole,
                 role = role,
                 content = content,

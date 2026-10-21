@@ -70,8 +70,6 @@ fun SettingsScreen(vm: MainViewModel) {
     var omniModel by remember(s) { mutableStateOf(s.omniModel) }
     var omniFirst by remember(s) { mutableStateOf(s.omniFirst) }
     var ghToken by remember(s) { mutableStateOf("") }
-    var ghRepo by remember(s) { mutableStateOf(s.ghRepo) }
-    var ghBranch by remember(s) { mutableStateOf(s.ghBranch) }
     var bible by remember(s) { mutableStateOf(s.bible) }
     var saved by remember { mutableStateOf(false) }
 
@@ -105,15 +103,17 @@ fun SettingsScreen(vm: MainViewModel) {
 
         SectionTitle("GitHub (wadah kode)")
         Text(
-            "Agent menyimpan file ke repo ini, GitHub Actions membuild, lalu Debugger memperbaiki error otomatis. " +
-                "Token fine-grained: Contents (RW), Workflows (RW), Actions (Read).",
+            "Agent menyimpan file ke repo project, GitHub Actions membuild, lalu Debugger memperbaiki error otomatis. " +
+                "Token fine-grained: Contents (RW), Workflows (RW), Actions (Read). Untuk agent Repo membuat repo baru, token perlu izin pembuatan repo (Administration: RW).",
             color = Color.Gray, fontSize = 12.sp
         )
         Field("Token", ghToken, { ghToken = it; saved = false }, "github_pat_...", secret = true, hasSaved = s.hasGhToken)
-        Field("Repo", ghRepo, { ghRepo = it; saved = false }, "username/nama-repo")
-        Field("Branch", ghBranch, { ghBranch = it; saved = false }, "main")
+        Text(
+            "Repo & branch diatur per project lewat tombol ✎ Repo di bar atas.",
+            color = Color.Gray, fontSize = 12.sp
+        )
 
-        SectionTitle("Project Bible")
+        SectionTitle("Project Bible (project aktif)")
         Text("Selalu dikirim ke semua agent", color = Color.Gray, fontSize = 12.sp)
         Field(
             "Isi Bible", bible, { bible = it; saved = false },
@@ -124,7 +124,7 @@ fun SettingsScreen(vm: MainViewModel) {
         Button(
             onClick = {
                 vm.saveSettings(
-                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, ghRepo, ghBranch, bible)
+                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, bible)
                 )
                 saved = true
             },
@@ -134,6 +134,6 @@ fun SettingsScreen(vm: MainViewModel) {
         if (saved) Text("Tersimpan ✓", color = Color(0xFF00E676))
 
         Spacer(Modifier.height(24.dp))
-        Text("PixelForge v0.2.0-alpha\nPersonal use • Multi-agent living office", color = Color.Gray)
+        Text("PixelForge v0.3.0-alpha\nPersonal use • Multi-agent living office", color = Color.Gray)
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.pixelforge.ui.MainViewModel
+import com.pixelforge.ui.components.ProjectBar
 import com.pixelforge.ui.office.OfficeScreen
 import com.pixelforge.ui.screens.approval.ApprovalScreen
 import com.pixelforge.ui.screens.chat.ChatScreen
@@ -29,6 +30,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
     LaunchedEffect(approvals.isNotEmpty()) { if (approvals.isNotEmpty()) tab = 2 }
 
     Scaffold(
+        topBar = { ProjectBar(vm) },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Default.Home, "Office") }, label = { Text("Office") })

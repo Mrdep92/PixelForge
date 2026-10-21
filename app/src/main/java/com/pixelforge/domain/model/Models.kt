@@ -9,7 +9,8 @@ enum class AgentRole {
     DEBUGGER,
     CREATIVE,
     BUSINESS,
-    GENERAL
+    GENERAL,
+    REPO
 }
 
 enum class AgentStatus {

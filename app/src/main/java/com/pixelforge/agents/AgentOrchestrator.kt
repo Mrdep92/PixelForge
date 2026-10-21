@@ -28,7 +28,11 @@ data class SavedOrch(
  * Agent yang gagal (limit/jaringan) tidak hilang: tetap di daftar `unfinished` dan bisa dilanjutkan.
  * Posisi agent berupa pecahan 0..1 dari ukuran kantor supaya pas di semua ukuran layar.
  */
-class AgentOrchestrator(private val store: StateStore? = null) {
+class AgentOrchestrator(
+    private val store: StateStore? = null,
+    private val projectId: String = "default"
+) {
+    private val key = "orch:$projectId"
 
     // Batasi panggilan LLM bersamaan supaya tidak kena rate limit
     private val llmGate = Semaphore(2)
@@ -46,7 +50,8 @@ class AgentOrchestrator(private val store: StateStore? = null) {
     val currentPlan: StateFlow<TaskPlan?> = _currentPlan.asStateFlow()
 
     init {
-        val s = store?.load("orch", SavedOrch::class.java)
+        val s = store?.load(key, SavedOrch::class.java)
+            ?: if (projectId == "default") store?.load("orch", SavedOrch::class.java) else null
         if (s != null) {
             _currentPlan.value = s.plan
             _pendingApprovals.value = s.pending ?: emptyList()
@@ -57,8 +62,11 @@ class AgentOrchestrator(private val store: StateStore? = null) {
     }
 
     private fun persist() {
-        store?.save("orch", SavedOrch(_currentPlan.value, _pendingApprovals.value, _unfinished.value))
+        store?.save(key, SavedOrch(_currentPlan.value, _pendingApprovals.value, _unfinished.value))
     }
+
+    /** Dipakai agent non-pipeline (mis. Repo) untuk menampilkan statusnya di kantor. */
+    fun announce(role: AgentRole, status: AgentStatus, bubble: String?) = setStatus(role, status, bubble)
 
     fun hasWork(): Boolean = _pendingApprovals.value.isNotEmpty() || _unfinished.value.isNotEmpty()
 
@@ -69,7 +77,8 @@ class AgentOrchestrator(private val store: StateStore? = null) {
         Agent(role = AgentRole.DEBUGGER, name = "Debug", positionX = 0.08f, positionY = 0.42f),
         Agent(role = AgentRole.CREATIVE, name = "Creat", positionX = 0.40f, positionY = 0.50f),
         Agent(role = AgentRole.BUSINESS, name = "Biz", positionX = 0.72f, positionY = 0.42f),
-        Agent(role = AgentRole.GENERAL, name = "Gen", positionX = 0.40f, positionY = 0.78f)
+        Agent(role = AgentRole.GENERAL, name = "Gen", positionX = 0.40f, positionY = 0.78f),
+        Agent(role = AgentRole.REPO, name = "Repo", positionX = 0.72f, positionY = 0.78f)
     )
 
     /** Langkah 1–3. Hasilnya menunggu persetujuan user. */

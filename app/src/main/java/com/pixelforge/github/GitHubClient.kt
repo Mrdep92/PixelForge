@@ -17,6 +17,8 @@ class GitHubException(message: String) : Exception(message)
 
 data class CiRun(val id: Long, val conclusion: String, val url: String)
 
+data class RepoInfo(val fullName: String, val defaultBranch: String, val url: String)
+
 /** Commit file ke repo, tunggu GitHub Actions, dan ambil log error untuk Debugger. */
 class GitHubClient(private val token: String, repo: String, private val branch: String) {
 
@@ -37,8 +39,15 @@ class GitHubClient(private val token: String, repo: String, private val branch: 
         path: String,
         body: JsonObject? = null,
         client: HttpClient = http
+    ): Resp = callUrl(method, api + path, body, client)
+
+    private suspend fun callUrl(
+        method: HttpMethod,
+        url: String,
+        body: JsonObject? = null,
+        client: HttpClient = http
     ): Resp = withContext(Dispatchers.IO) {
-        val r = client.request(api + path) {
+        val r = client.request(url) {
             this.method = method
             header(HttpHeaders.Authorization, "Bearer $token")
             header(HttpHeaders.Accept, "application/vnd.github+json")
@@ -62,6 +71,36 @@ class GitHubClient(private val token: String, repo: String, private val branch: 
     }
 
     private fun b64(s: String): String = Base64.encodeToString(s.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+
+    /** Agent Repo: buat repo baru (dengan README awal supaya langsung siap di-commit). */
+    suspend fun createRepo(name: String, description: String, isPrivate: Boolean): RepoInfo {
+        val body = JsonObject().apply {
+            addProperty("name", name)
+            addProperty("description", description.take(200))
+            addProperty("private", isPrivate)
+            addProperty("auto_init", true)
+        }
+        val r = callUrl(HttpMethod.Post, "https://api.github.com/user/repos", body)
+        if (r.code in 200..299) {
+            val o = JsonParser.parseString(r.body).asJsonObject
+            return RepoInfo(
+                o.get("full_name").asString,
+                o.get("default_branch").asString,
+                o.get("html_url").asString
+            )
+        }
+        if (r.code == 422) {
+            throw GitHubException("Nama repo '$name' sudah dipakai atau tidak valid. Coba nama lain.")
+        }
+        if (r.code == 401) throw GitHubException("Token GitHub salah atau kedaluwarsa.")
+        if (r.code == 403 || r.code == 404) {
+            throw GitHubException(
+                "Token tidak punya izin membuat repo baru (HTTP ${r.code}: ${msgOf(r.body)}). " +
+                    "Buat repo kosong manual di https://github.com/new?name=$name lalu isi nama repo lewat tombol ✎ di bar project."
+            )
+        }
+        throw GitHubException("Gagal membuat repo → HTTP ${r.code}: ${msgOf(r.body)}")
+    }
 
     /** Satu commit berisi semua file. Return SHA commit baru. */
     suspend fun commitFiles(files: Map<String, String>, message: String): String {

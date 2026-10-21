@@ -9,11 +9,14 @@ import java.io.File
  *   isi file
  *   === END FILE ===
  */
-class Workspace(context: Context) {
+class Workspace(context: Context, projectId: String = "default") {
 
     data class FileOut(val path: String, val content: String, val complete: Boolean = true)
 
-    private val root = File(context.filesDir, "workspace").apply { mkdirs() }
+    private val root = (
+        if (projectId == "default") File(context.filesDir, "workspace")
+        else File(context.filesDir, "projects/$projectId")
+        ).apply { mkdirs() }
 
     @Synchronized
     fun write(files: List<FileOut>): List<String> {
