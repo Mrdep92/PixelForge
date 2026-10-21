@@ -6,7 +6,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pixelforge.PixelForgeApp
+import com.pixelforge.agents.AgentLoop
 import com.pixelforge.agents.AgentOrchestrator
+import com.pixelforge.agents.Executor
+import com.pixelforge.agents.ToolProtocol
 import com.pixelforge.core.AgentForegroundService
 import com.pixelforge.core.StateStore
 import com.pixelforge.data.local.entity.MessageEntity
@@ -136,12 +139,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             _bible.value = db.bibleDao().get(_projectId.value)?.content ?: DEFAULT_BIBLE
             _settings.value = readSettings()
-        }
-        viewModelScope.launch {
-            while (true) {
-                delay(3000)
-                orchestrator.idleTick()
-            }
         }
     }
 
@@ -359,7 +356,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (orchestrator.hasWork()) {
                 val done = orchestrator.execute(
                     fullContext(),
-                    { s, u -> router.chat(s, u) },
+                    agentRunner(router),
                     { role, out -> handleOutput(role, out) },
                     { role, msg -> post("SYSTEM", "system", "⏸ ${role.name} tertunda: $msg") }
                 )
@@ -400,6 +397,54 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         post("AGENT", "assistant", text.trim(), role.name)
     }
 
+    // ---------- Agent bertool (Coder / Debugger) ----------
+
+    private class ToolRun(val text: String, val changed: List<String>)
+
+    /** Coder & Debugger memakai loop bertool (baca/cari/edit file); agent lain satu panggilan biasa. */
+    private fun agentRunner(router: LlmRouter): suspend (AgentRole, String, String) -> String = { role, system, user ->
+        if (role == AgentRole.CODER || role == AgentRole.DEBUGGER) {
+            val run = runToolAgent(router, role, system, user)
+            if (run.text.startsWith(LOOP_INCOMPLETE)) throw IllegalStateException(run.text)
+            run.text
+        } else {
+            router.chat(system + "\n" + Workspace.FILE_FORMAT_PROMPT, user)
+        }
+    }
+
+    private suspend fun runToolAgent(router: LlmRouter, role: AgentRole, system: String, user: String): ToolRun {
+        val ws = workspace
+        val exec = object : Executor {
+            override fun read(path: String): String? = if (ws.exists(path)) ws.read(path) else null
+            override fun write(path: String, content: String) {
+                ws.write(listOf(Workspace.FileOut(path, content)))
+            }
+            override fun list(): List<String> = ws.list()
+        }
+        val orch = orchestrator
+        val loop = AgentLoop(
+            { msgs -> router.chat(msgs.map { LlmRouter.ChatMessage(it.role, it.content) }) },
+            exec,
+            12
+        )
+        val res = loop.run(system + "\n" + ToolProtocol.PROMPT, user) { step ->
+            orch.announce(role, AgentStatus.WORKING, step.take(40))
+            post("SYSTEM", "system", "${role.name.lowercase().replaceFirstChar { it.uppercase() }} • $step")
+        }
+        _files.value = ws.list()
+        val text = buildString {
+            append(if (res.finished) res.summary else LOOP_INCOMPLETE + " " + res.summary)
+            if (res.changed.isNotEmpty()) append("\n\n📁 Diubah:\n" + res.changed.joinToString("\n") { "• $it" })
+        }
+        return ToolRun(text, res.changed)
+    }
+
+    fun clearChat() {
+        if (_busy.value) return
+        val pid = _projectId.value
+        viewModelScope.launch { db.messageDao().clearProject(pid) }
+    }
+
     // ---------- Commit → build → debug (GitHub) ----------
 
     private fun setCi(c: CiState) {
@@ -433,16 +478,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         return
                     }
                     post("SYSTEM", "system", "🛠 Debugger memperbaiki error (percobaan ${attempt + 1}/$MAX_FIX)...")
-                    val out = router.chat(DEBUG_SYSTEM + Workspace.FILE_FORMAT_PROMPT + "\nProject Bible:\n" + _bible.value, debugUser(log))
-                    val files = Workspace.extractFiles(out)
-                    if (files.isEmpty()) {
-                        post("SYSTEM", "system", "⚠ Debugger tidak menghasilkan file perbaikan:\n" + Workspace.stripFiles(out).take(1200))
+                    val run = runToolAgent(
+                        router,
+                        AgentRole.DEBUGGER,
+                        DEBUG_SYSTEM + "Project Bible:\n" + fullContext(),
+                        "CI build log (condensed):\n$log\n\nFind the root cause and fix it. Use LIST/READ/GREP to inspect the files first."
+                    )
+                    if (run.changed.isEmpty()) {
+                        post("SYSTEM", "system", "⚠ Debugger tidak mengubah file apa pun:\n" + run.text.take(1200))
                         setCi(CiState())
                         return
                     }
-                    val written = workspace.write(files)
-                    _files.value = workspace.list()
-                    post("AGENT", "assistant", Workspace.stripFiles(out).trim() + "\n\n📁 Diperbarui:\n" + written.joinToString("\n") { "• $it" }, "DEBUGGER")
+                    post("AGENT", "assistant", run.text, "DEBUGGER")
                     attempt++
                     fixed = true
                     setCi(CiState(true, log, attempt, true))
@@ -472,19 +519,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } finally {
             gh.close()
         }
-    }
-
-    private fun debugUser(log: String): String {
-        val sb = StringBuilder()
-        sb.append("CI build log (condensed):\n").append(log).append("\n\nCurrent workspace files:\n")
-        var budget = 24_000
-        for ((path, content) in workspace.readAll()) {
-            if (budget <= 0) break
-            val chunk = content.take(budget)
-            sb.append("=== FILE: ").append(path).append(" ===\n").append(chunk).append("\n=== END FILE ===\n")
-            budget -= chunk.length
-        }
-        return sb.toString()
     }
 
     // ---------- Util ----------
@@ -521,10 +555,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     companion object {
         const val PROJECT_ID = "default"
         private const val MAX_FIX = 3
+        private const val LOOP_INCOMPLETE = "[BATAS PUTARAN]"
         private const val DEBUG_SYSTEM =
-            "You are the Debugger agent. A CI build failed. Find the root cause from the log and fix it. " +
-                "Explain in at most 3 sentences, then output ONLY the files that must change, each COMPLETE. " +
-                "Reply in Indonesian.\n"
+            "You are the Debugger agent. A CI build failed. Find the root cause from the log and fix it " +
+                "with minimal edits. Reply in Indonesian.\n"
         val DEFAULT_BIBLE = """
             # Project Bible
             ## Tujuan

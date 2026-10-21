@@ -51,7 +51,11 @@ class LlmRouter(private val providers: List<Provider>) {
     data class Choice(val message: ChatMessage?, val finish_reason: String? = null)
     data class ChatResponse(val choices: List<Choice>?)
 
-    suspend fun chat(systemPrompt: String, userPrompt: String): String {
+    suspend fun chat(systemPrompt: String, userPrompt: String): String =
+        chat(listOf(ChatMessage("system", systemPrompt), ChatMessage("user", userPrompt)))
+
+    /** Percakapan multi-putaran (dipakai agent loop). */
+    suspend fun chat(messages: List<ChatMessage>): String {
         if (providers.isEmpty()) {
             throw LlmExhaustedException("Belum ada provider LLM yang diatur di Settings.", false)
         }
@@ -63,7 +67,7 @@ class LlmRouter(private val providers: List<Provider>) {
                 while (attempt < 2) {
                     attempt++
                     try {
-                        return call(p, model, systemPrompt, userPrompt)
+                        return call(p, model, messages)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: HttpFail) {
@@ -90,7 +94,7 @@ class LlmRouter(private val providers: List<Provider>) {
         )
     }
 
-    private suspend fun call(p: Provider, model: String, system: String, user: String): String =
+    private suspend fun call(p: Provider, model: String, messages: List<ChatMessage>): String =
         withContext(Dispatchers.IO) {
             val base = p.baseUrl.trim().trimEnd('/')
             val url = if (base.endsWith("/chat/completions")) base else "$base/chat/completions"
@@ -99,10 +103,7 @@ class LlmRouter(private val providers: List<Provider>) {
                 p.headers.forEach { (k, v) -> header(k, v) }
                 contentType(ContentType.Application.Json)
                 setBody(
-                    ChatRequest(
-                        model = model,
-                        messages = listOf(ChatMessage("system", system), ChatMessage("user", user))
-                    )
+                    ChatRequest(model = model, messages = messages)
                 )
             }
             if (!response.status.isSuccess()) {

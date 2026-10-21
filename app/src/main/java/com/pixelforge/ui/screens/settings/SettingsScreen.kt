@@ -134,6 +134,6 @@ fun SettingsScreen(vm: MainViewModel) {
         if (saved) Text("Tersimpan ✓", color = Color(0xFF00E676))
 
         Spacer(Modifier.height(24.dp))
-        Text("PixelForge v0.3.0-alpha\nPersonal use • Multi-agent living office", color = Color.Gray)
+        Text("PixelForge v0.4.0-alpha\nPersonal use • Multi-agent living office", color = Color.Gray)
     }
 }

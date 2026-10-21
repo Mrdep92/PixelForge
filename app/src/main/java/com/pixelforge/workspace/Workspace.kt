@@ -47,6 +47,12 @@ class Workspace(context: Context, projectId: String = "default") {
     }
 
     @Synchronized
+    fun exists(path: String): Boolean {
+        val f = File(root, path)
+        return f.canonicalPath.startsWith(root.canonicalPath + File.separator) && f.isFile
+    }
+
+    @Synchronized
     fun readAll(): Map<String, String> = list().associateWith { read(it) }
 
     companion object {

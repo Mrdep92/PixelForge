@@ -2,7 +2,6 @@ package com.pixelforge.agents
 
 import com.pixelforge.core.StateStore
 import com.pixelforge.domain.model.*
-import com.pixelforge.workspace.Workspace
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -144,7 +143,7 @@ class AgentOrchestrator(
      */
     suspend fun execute(
         projectBible: String,
-        llmCall: LlmCall,
+        runner: suspend (AgentRole, String, String) -> String,
         onResult: suspend (AgentRole, String) -> Unit,
         onFailure: suspend (AgentRole, String) -> Unit
     ): Boolean {
@@ -166,12 +165,10 @@ class AgentOrchestrator(
                 async {
                     try {
                         val out = llmGate.withPermit {
-                            llmCall(
+                            runner(
+                                a.agentRole,
                                 "You are the ${a.agentRole.name} agent in PixelForge.\n" +
                                     "Project Bible (follow strictly):\n$projectBible\n" +
-                                    Workspace.FILE_FORMAT_PROMPT +
-                                    "If the project can be built or tested and the workspace has no " +
-                                    "file under .github/workflows/, include a GitHub Actions workflow so the build can be verified.\n" +
                                     "Reply in the same language as the user's command.",
                                 "User command: ${plan.userCommand}\n\nApproved plan:\n${plan.architectPlan}\n\n" +
                                     "Your report: ${a.report}\n\n" +
@@ -209,26 +206,9 @@ class AgentOrchestrator(
         _agents.update { list -> list.map { it.copy(status = AgentStatus.IDLE, bubbleText = null) } }
     }
 
-    /** Kehidupan kantor: agent yang menganggur jalan-jalan & ngomong sendiri. */
-    fun idleTick() {
-        _agents.update { list ->
-            list.map { a ->
-                if (a.status != AgentStatus.IDLE) a
-                else a.copy(
-                    positionX = if (Math.random() > 0.5) wander(a.positionX, 0.02f, 0.78f) else a.positionX,
-                    positionY = if (Math.random() > 0.5) wander(a.positionY, 0.05f, 0.80f) else a.positionY,
-                    bubbleText = if (Math.random() > 0.65) IDLE_BUBBLES.random() else null
-                )
-            }
-        }
-    }
-
-    private fun wander(v: Float, min: Float, max: Float) =
-        (v + (Math.random().toFloat() - 0.5f) * 0.12f).coerceIn(min, max)
-
     private fun setStatus(role: AgentRole, status: AgentStatus, bubble: String?) {
         _agents.update { list ->
-            list.map { if (it.role == role) it.copy(status = status, bubbleText = bubble) else it }
+            list.map { if (it.role == role) it.copy(status = status, bubbleText = bubble, lastActivity = System.currentTimeMillis()) else it }
         }
     }
 
@@ -245,9 +225,5 @@ class AgentOrchestrator(
         if (has("bisnis", "business", "plan", "rencana", "strategi", "pasar", "market")) roles += AgentRole.BUSINESS
         if (roles.isEmpty()) roles += AgentRole.GENERAL
         return roles.distinct()
-    }
-
-    private companion object {
-        val IDLE_BUBBLES = listOf("Ngopi dulu ☕", "Stretch...", "Hmm...", "Cek email", "Zzz")
     }
 }

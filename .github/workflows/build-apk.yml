@@ -23,6 +23,10 @@ jobs:
         with:
           gradle-version: 8.9
 
+      - name: Unit tests
+        shell: bash
+        run: gradle testDebugUnitTest --stacktrace 2>&1 | tee test.log
+
       - name: Build debug APK
         shell: bash
         run: gradle assembleDebug --stacktrace 2>&1 | tee build.log
@@ -31,7 +35,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          msg=$(grep -E '^e: |error:|What went wrong|FAILED|Execution failed' -A3 build.log | head -60 | sed ':a;N;$!ba;s/\n/%0A/g')
+          msg=$(cat test.log build.log 2>/dev/null | grep -E '^e: |error:|What went wrong|FAILED|Execution failed|AssertionError|expected' -A3 | head -60 | sed ':a;N;$!ba;s/\n/%0A/g')
           echo "::error title=Build errors::$msg"
 
       - uses: actions/upload-artifact@v4

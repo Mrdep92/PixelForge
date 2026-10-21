@@ -1,7 +1,10 @@
 package com.pixelforge.ui.screens.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -17,6 +20,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.text.style.TextOverflow
+import com.pixelforge.domain.model.Agent
+import com.pixelforge.domain.model.AgentStatus
 import com.pixelforge.ui.MainViewModel
 import com.pixelforge.ui.components.MarkdownText
 
@@ -24,7 +30,9 @@ import com.pixelforge.ui.components.MarkdownText
 fun ChatScreen(vm: MainViewModel) {
     val messages by vm.messages.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val agents by vm.agents.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
+    var confirmClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -38,9 +46,37 @@ fun ChatScreen(vm: MainViewModel) {
             .padding(8.dp)
             .imePadding()
     ) {
-        Text("Project Chat", color = Color(0xFF00E5FF), style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Chat",
+                color = Color(0xFF00E5FF),
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(8.dp).weight(1f)
+            )
+            TextButton(
+                onClick = { confirmClear = true },
+                enabled = messages.isNotEmpty() && !busy,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = Color(0xFFFFAB40),
+                    disabledContentColor = Color.Gray
+                )
+            ) { Text("🗑 Bersihkan") }
+        }
+        TeamStrip(agents)
+        Spacer(Modifier.height(6.dp))
 
-        LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
+        if (messages.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(
+                    "Belum ada pesan.\nBeri perintah di bawah — tim akan menyusun rencana dan menunggu persetujuanmu.",
+                    color = Color.Gray,
+                    fontSize = 13.sp
+                )
+            }
+        } else LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth()) {
             items(messages, key = { it.id }) { m ->
                 val isUser = m.type == "USER"
                 val label = when (m.type) {
@@ -70,6 +106,18 @@ fun ChatScreen(vm: MainViewModel) {
             Text("Agent sedang bekerja...", color = Color.Gray, fontSize = 12.sp)
         }
 
+        if (confirmClear) {
+            AlertDialog(
+                onDismissRequest = { confirmClear = false },
+                title = { Text("Bersihkan chat?") },
+                text = { Text("Semua pesan di project ini dihapus. Rencana, file, dan repo tidak ikut terhapus.") },
+                confirmButton = {
+                    TextButton(onClick = { confirmClear = false; vm.clearChat() }) { Text("Hapus") }
+                },
+                dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Batal") } }
+            )
+        }
+
         Row(modifier = Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = input,
@@ -89,6 +137,56 @@ fun ChatScreen(vm: MainViewModel) {
                 onClick = { vm.send(input); input = "" }
             ) {
                 Icon(Icons.Default.Send, "Send", tint = if (busy) Color.Gray else Color(0xFF00E5FF))
+            }
+        }
+    }
+}
+
+private fun statusLabel(s: AgentStatus): String = when (s) {
+    AgentStatus.IDLE -> "siaga"
+    AgentStatus.THINKING -> "berpikir"
+    AgentStatus.REPORTING -> "lapor"
+    AgentStatus.WORKING -> "bekerja"
+    AgentStatus.WAITING_APPROVAL -> "tunggu ACC"
+    AgentStatus.PAUSED -> "tertunda"
+    AgentStatus.DONE -> "selesai"
+}
+
+private fun statusColor(s: AgentStatus): Color = when (s) {
+    AgentStatus.IDLE -> Color(0xFF607D8B)
+    AgentStatus.THINKING, AgentStatus.REPORTING -> Color(0xFF00E5FF)
+    AgentStatus.WORKING -> Color(0xFF00E676)
+    AgentStatus.WAITING_APPROVAL -> Color(0xFFFFAB40)
+    AgentStatus.PAUSED -> Color(0xFFFF5252)
+    AgentStatus.DONE -> Color(0xFF69F0AE)
+}
+
+/** Status tim secara langsung: siapa sedang apa. */
+@Composable
+private fun TeamStrip(agents: List<Agent>) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        agents.forEach { a ->
+            Row(
+                modifier = Modifier
+                    .background(Color(0xFF16213E), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(Modifier.size(8.dp).background(statusColor(a.status), CircleShape))
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    "${a.name} • ${a.bubbleText ?: statusLabel(a.status)}",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 160.dp)
+                )
             }
         }
     }
