@@ -11,7 +11,7 @@ import java.io.File
  */
 class Workspace(context: Context) {
 
-    data class FileOut(val path: String, val content: String)
+    data class FileOut(val path: String, val content: String, val complete: Boolean = true)
 
     private val root = File(context.filesDir, "workspace").apply { mkdirs() }
 
@@ -52,20 +52,71 @@ class Workspace(context: Context) {
                 "(complete content, never truncated, NO markdown code fences around the block):\n" +
                 "=== FILE: relative/path/File.ext ===\n<entire file content>\n=== END FILE ===\n"
 
-        private val FILE_RE = Regex(
-            """===\s*FILE:\s*(.+?)\s*===[ \t]*\r?\n(.*?)\r?\n?===\s*END FILE\s*===""",
-            setOf(RegexOption.DOT_MATCHES_ALL)
-        )
+        sealed class Segment {
+            data class Text(val text: String) : Segment()
+            data class File(val path: String, val content: String, val complete: Boolean) : Segment()
+        }
+
+        private val START_RE = Regex("""^\s*={2,}\s*FILE:\s*(.+?)\s*=*\s*$""")
+        private val END_RE = Regex("""^\s*={2,}\s*END\s+FILE\s*=*\s*$""", RegexOption.IGNORE_CASE)
+
+        /**
+         * Pecah output agent jadi teks biasa dan blok file. Toleran: kalau penanda END hilang
+         * (jawaban terpotong), file tetap diambil tapi ditandai tidak lengkap.
+         */
+        fun parse(text: String): List<Segment> {
+            val out = mutableListOf<Segment>()
+            val textBuf = StringBuilder()
+            val fileBuf = StringBuilder()
+            var curPath: String? = null
+            for (line in text.lines()) {
+                val m = START_RE.matchEntire(line)
+                if (m != null) {
+                    val prev = curPath
+                    if (prev != null) {
+                        out += Segment.File(prev, fileBuf.toString(), false)
+                        fileBuf.clear()
+                    } else if (textBuf.isNotEmpty()) {
+                        out += Segment.Text(textBuf.toString())
+                        textBuf.clear()
+                    }
+                    curPath = m.groupValues[1].trim()
+                    continue
+                }
+                val cur = curPath
+                if (cur != null) {
+                    if (END_RE.matches(line)) {
+                        out += Segment.File(cur, fileBuf.toString(), true)
+                        fileBuf.clear()
+                        curPath = null
+                    } else {
+                        fileBuf.append(line).append('\n')
+                    }
+                } else {
+                    textBuf.append(line).append('\n')
+                }
+            }
+            val last = curPath
+            if (last != null) out += Segment.File(last, fileBuf.toString(), false)
+            else if (textBuf.isNotEmpty()) out += Segment.Text(textBuf.toString())
+            return out
+        }
 
         fun extractFiles(text: String): List<FileOut> =
-            FILE_RE.findAll(text).mapNotNull { m ->
-                val path = cleanPath(m.groupValues[1]) ?: return@mapNotNull null
-                FileOut(path, stripFence(m.groupValues[2]))
-            }.toList()
+            parse(text).filterIsInstance<Segment.File>().mapNotNull { f ->
+                val path = cleanPath(f.path) ?: return@mapNotNull null
+                val body = stripFence(f.content)
+                if (body.isBlank()) null else FileOut(path, body, f.complete)
+            }
 
         /** Ganti blok file dengan penanda ringkas supaya chat tetap enak dibaca. */
         fun stripFiles(text: String): String =
-            FILE_RE.replace(text) { "📄 ${it.groupValues[1].trim()}" }
+            parse(text).joinToString("\n") { seg ->
+                when (seg) {
+                    is Segment.Text -> seg.text.trimEnd()
+                    is Segment.File -> "📄 " + seg.path + if (seg.complete) "" else " ⚠ terpotong"
+                }
+            }
 
         private fun cleanPath(raw: String): String? {
             val p = raw.trim().trim('`', '"', '\'').replace('\\', '/').removePrefix("./").trimStart('/')

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pixelforge.ui.MainViewModel
+import com.pixelforge.ui.components.MarkdownText
 
 @Composable
 fun ChatScreen(vm: MainViewModel) {
@@ -58,7 +59,7 @@ fun ChatScreen(vm: MainViewModel) {
                             .padding(12.dp)
                     ) {
                         if (label != null) Text(label, color = Color(0xFFFFAB40), fontSize = 12.sp)
-                        SelectionContainer { Text(m.content, color = Color.White, fontSize = 14.sp) }
+                        SelectionContainer { MarkdownText(m.content) }
                     }
                 }
             }

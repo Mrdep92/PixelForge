@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pixelforge.domain.model.TaskStatus
 import com.pixelforge.ui.MainViewModel
+import com.pixelforge.ui.components.MarkdownText
 
 @Composable
 fun ApprovalScreen(vm: MainViewModel) {
@@ -78,7 +79,7 @@ private fun ReportCard(title: String, body: String) {
         Column(Modifier.padding(16.dp)) {
             Text(title, color = Color(0xFFFFAB40), fontSize = 16.sp)
             Spacer(Modifier.height(8.dp))
-            Text(body, color = Color.White, fontSize = 14.sp)
+            MarkdownText(body)
         }
     }
 }

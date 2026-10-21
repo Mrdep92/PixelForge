@@ -270,6 +270,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val written = workspace.write(files)
             _files.value = workspace.list()
             text += "\n\n📁 Disimpan ke workspace:\n" + written.joinToString("\n") { "• $it" }
+            val cut = files.filter { !it.complete }.map { it.path }
+            if (cut.isNotEmpty()) {
+                text += "\n\n⚠ Jawaban terpotong (batas token), file ini mungkin tidak lengkap: " + cut.joinToString()
+            }
         }
         post("AGENT", "assistant", text.trim(), role.name)
     }
