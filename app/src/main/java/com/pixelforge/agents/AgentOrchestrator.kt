@@ -1,6 +1,8 @@
 package com.pixelforge.agents
 
+import com.pixelforge.core.StateStore
 import com.pixelforge.domain.model.*
+import com.pixelforge.workspace.Workspace
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -14,13 +16,21 @@ import kotlin.coroutines.cancellation.CancellationException
 
 typealias LlmCall = suspend (systemPrompt: String, userPrompt: String) -> String
 
+/** Status yang disimpan ke disk supaya kerja bisa dilanjutkan setelah limit / app ditutup. */
+data class SavedOrch(
+    val plan: TaskPlan?,
+    val pending: List<ApprovalRequest>,
+    val unfinished: List<ApprovalRequest>
+)
+
 /**
  * Flow: perintah user → Architect bikin rencana → agent lapor → USER APPROVE → eksekusi paralel.
+ * Agent yang gagal (limit/jaringan) tidak hilang: tetap di daftar `unfinished` dan bisa dilanjutkan.
  * Posisi agent berupa pecahan 0..1 dari ukuran kantor supaya pas di semua ukuran layar.
  */
-class AgentOrchestrator {
+class AgentOrchestrator(private val store: StateStore? = null) {
 
-    // Batasi panggilan LLM bersamaan supaya tidak kena rate limit OpenRouter
+    // Batasi panggilan LLM bersamaan supaya tidak kena rate limit
     private val llmGate = Semaphore(2)
 
     private val _agents = MutableStateFlow(createDefaultAgents())
@@ -29,8 +39,28 @@ class AgentOrchestrator {
     private val _pendingApprovals = MutableStateFlow<List<ApprovalRequest>>(emptyList())
     val pendingApprovals: StateFlow<List<ApprovalRequest>> = _pendingApprovals.asStateFlow()
 
+    private val _unfinished = MutableStateFlow<List<ApprovalRequest>>(emptyList())
+    val unfinished: StateFlow<List<ApprovalRequest>> = _unfinished.asStateFlow()
+
     private val _currentPlan = MutableStateFlow<TaskPlan?>(null)
     val currentPlan: StateFlow<TaskPlan?> = _currentPlan.asStateFlow()
+
+    init {
+        val s = store?.load("orch", SavedOrch::class.java)
+        if (s != null) {
+            _currentPlan.value = s.plan
+            _pendingApprovals.value = s.pending ?: emptyList()
+            _unfinished.value = s.unfinished ?: emptyList()
+            _pendingApprovals.value.forEach { setStatus(it.agentRole, AgentStatus.WAITING_APPROVAL, null) }
+            _unfinished.value.forEach { setStatus(it.agentRole, AgentStatus.PAUSED, "⏸ Tertunda") }
+        }
+    }
+
+    private fun persist() {
+        store?.save("orch", SavedOrch(_currentPlan.value, _pendingApprovals.value, _unfinished.value))
+    }
+
+    fun hasWork(): Boolean = _pendingApprovals.value.isNotEmpty() || _unfinished.value.isNotEmpty()
 
     private fun createDefaultAgents(): List<Agent> = listOf(
         Agent(role = AgentRole.ARCHITECT, name = "Arch", positionX = 0.08f, positionY = 0.08f),
@@ -50,11 +80,13 @@ class AgentOrchestrator {
         llmCall: LlmCall
     ): TaskPlan {
         resetAgents()
+        _unfinished.value = emptyList()
         setStatus(AgentRole.ARCHITECT, AgentStatus.THINKING, "Menyusun rencana...")
 
         val planText = llmCall(
             "You are a senior software architect in PixelForge. Reply only with the plan. " +
-                "Reply in the same language as the user's command.",
+                "Reply in the same language as the user's command. " +
+                "If code is needed, list the files (with relative paths) to create or change.",
             "Project Bible:\n$projectBible\n\nUser command: $command\n\n" +
                 "Create a clear, step-by-step plan. Be concise."
         )
@@ -91,53 +123,76 @@ class AgentOrchestrator {
         }
 
         _pendingApprovals.value = approvals
+        persist()
         setStatus(AgentRole.ARCHITECT, AgentStatus.WAITING_APPROVAL, "Menunggu approval")
         roles.forEach { setStatus(it, AgentStatus.WAITING_APPROVAL, null) }
         return plan
     }
 
-    /** Langkah 5. Dipanggil setelah user menekan Approve. Semua agent jalan paralel. */
+    /**
+     * Langkah 5 (juga dipakai untuk melanjutkan). Semua agent jalan paralel.
+     * @return true kalau semua agent selesai; false kalau masih ada yang tertunda (bisa dilanjutkan).
+     */
     suspend fun execute(
         projectBible: String,
         llmCall: LlmCall,
-        onResult: suspend (AgentRole, String) -> Unit
-    ) {
-        val plan = _currentPlan.value ?: return
-        val approvals = _pendingApprovals.value
-        _pendingApprovals.value = emptyList()
+        onResult: suspend (AgentRole, String) -> Unit,
+        onFailure: suspend (AgentRole, String) -> Unit
+    ): Boolean {
+        val plan = _currentPlan.value ?: return true
+        if (_pendingApprovals.value.isNotEmpty()) {
+            _unfinished.value = _pendingApprovals.value
+            _pendingApprovals.value = emptyList()
+        }
+        val todo = _unfinished.value
+        if (todo.isEmpty()) return true
+
         _currentPlan.value = plan.copy(status = TaskStatus.IN_PROGRESS)
+        persist()
         setStatus(AgentRole.ARCHITECT, AgentStatus.IDLE, null)
-        approvals.forEach { setStatus(it.agentRole, AgentStatus.WORKING, "Mengerjakan...") }
+        todo.forEach { setStatus(it.agentRole, AgentStatus.WORKING, "Mengerjakan...") }
 
         coroutineScope {
-            approvals.map { a ->
+            todo.map { a ->
                 async {
                     try {
-                        val out = llmGate.withPermit { llmCall(
-                            "You are the ${a.agentRole.name} agent in PixelForge.\n" +
-                                "Project Bible (follow strictly):\n$projectBible\n" +
-                                "Reply in the same language as the user's command.",
-                            "User command: ${plan.userCommand}\n\nApproved plan:\n${plan.architectPlan}\n\n" +
-                                "Your report: ${a.report}\n\n" +
-                                "Now do your part. Deliver the concrete output (code, findings, or text)."
-                        ) }
+                        val out = llmGate.withPermit {
+                            llmCall(
+                                "You are the ${a.agentRole.name} agent in PixelForge.\n" +
+                                    "Project Bible (follow strictly):\n$projectBible\n" +
+                                    Workspace.FILE_FORMAT_PROMPT +
+                                    "If the project can be built or tested and the workspace has no " +
+                                    "file under .github/workflows/, include a GitHub Actions workflow so the build can be verified.\n" +
+                                    "Reply in the same language as the user's command.",
+                                "User command: ${plan.userCommand}\n\nApproved plan:\n${plan.architectPlan}\n\n" +
+                                    "Your report: ${a.report}\n\n" +
+                                    "Now do your part. Deliver the concrete output (files, findings, or text)."
+                            )
+                        }
                         onResult(a.agentRole, out)
+                        _unfinished.update { l -> l.filter { it.id != a.id } }
+                        persist()
                         setStatus(a.agentRole, AgentStatus.DONE, "Selesai ✓")
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
-                        onResult(a.agentRole, "⚠ Gagal: ${e.message}")
-                        setStatus(a.agentRole, AgentStatus.IDLE, null)
+                        setStatus(a.agentRole, AgentStatus.PAUSED, "⏸ Tertunda")
+                        onFailure(a.agentRole, e.message ?: e.javaClass.simpleName)
                     }
                 }
             }.awaitAll()
         }
-        _currentPlan.update { it?.copy(status = TaskStatus.COMPLETED) }
+        val done = _unfinished.value.isEmpty()
+        _currentPlan.update { it?.copy(status = if (done) TaskStatus.COMPLETED else TaskStatus.IN_PROGRESS) }
+        persist()
+        return done
     }
 
     fun rejectAll() {
         _pendingApprovals.value = emptyList()
+        _unfinished.value = emptyList()
         _currentPlan.update { it?.copy(status = TaskStatus.REJECTED) }
+        persist()
         resetAgents()
     }
 

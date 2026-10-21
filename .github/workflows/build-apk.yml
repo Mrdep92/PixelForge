@@ -24,7 +24,15 @@ jobs:
           gradle-version: 8.9
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        shell: bash
+        run: gradle assembleDebug --stacktrace 2>&1 | tee build.log
+
+      - name: Ringkas error build
+        if: failure()
+        shell: bash
+        run: |
+          msg=$(grep -E '^e: |error:|What went wrong|FAILED|Execution failed' -A3 build.log | head -60 | sed ':a;N;$!ba;s/\n/%0A/g')
+          echo "::error title=Build errors::$msg"
 
       - uses: actions/upload-artifact@v4
         with:

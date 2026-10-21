@@ -6,13 +6,17 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.pixelforge.ui.MainViewModel
+import com.pixelforge.ui.SettingsForm
 
 @Composable
 private fun fieldColors() = OutlinedTextFieldDefaults.colors(
@@ -23,15 +27,52 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 @Composable
-fun SettingsScreen(vm: MainViewModel) {
-    val hasKey by vm.hasKey.collectAsStateWithLifecycle()
-    val savedModel by vm.model.collectAsStateWithLifecycle()
-    val savedBible by vm.bible.collectAsStateWithLifecycle()
+private fun SectionTitle(text: String) {
+    Spacer(Modifier.height(24.dp))
+    Text(text, color = Color(0xFF00E5FF), fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(4.dp))
+}
 
-    var apiKey by remember { mutableStateOf("") }
-    var showKey by remember { mutableStateOf(false) }
-    var model by remember(savedModel) { mutableStateOf(savedModel) }
-    var bible by remember(savedBible) { mutableStateOf(savedBible) }
+@Composable
+private fun Field(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+    placeholder: String = "",
+    secret: Boolean = false,
+    hasSaved: Boolean = false,
+    singleLine: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    Spacer(Modifier.height(12.dp))
+    Text(label, color = Color.White, fontSize = 14.sp)
+    if (hasSaved) Text("Tersimpan ✓ (kosongkan jika tidak ingin mengganti)", color = Color(0xFF00E676), fontSize = 12.sp)
+    Spacer(Modifier.height(4.dp))
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        modifier = modifier.fillMaxWidth(),
+        singleLine = singleLine,
+        placeholder = { Text(placeholder) },
+        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+        colors = fieldColors()
+    )
+}
+
+@Composable
+fun SettingsScreen(vm: MainViewModel) {
+    val s by vm.settings.collectAsStateWithLifecycle()
+
+    var apiKey by remember(s) { mutableStateOf("") }
+    var model by remember(s) { mutableStateOf(s.model) }
+    var omniUrl by remember(s) { mutableStateOf(s.omniUrl) }
+    var omniKey by remember(s) { mutableStateOf("") }
+    var omniModel by remember(s) { mutableStateOf(s.omniModel) }
+    var omniFirst by remember(s) { mutableStateOf(s.omniFirst) }
+    var ghToken by remember(s) { mutableStateOf("") }
+    var ghRepo by remember(s) { mutableStateOf(s.ghRepo) }
+    var ghBranch by remember(s) { mutableStateOf(s.ghBranch) }
+    var bible by remember(s) { mutableStateOf(s.bible) }
     var saved by remember { mutableStateOf(false) }
 
     Column(
@@ -43,55 +84,56 @@ fun SettingsScreen(vm: MainViewModel) {
             .imePadding()
     ) {
         Text("Settings", color = Color(0xFF00E5FF), style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(20.dp))
 
-        Text("OpenRouter API Key", color = Color.White)
-        if (hasKey) Text("Tersimpan ✓ (kosongkan jika tidak ingin mengganti)", color = Color(0xFF00E676))
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it; saved = false },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            placeholder = { Text("sk-or-...") },
-            visualTransformation = if (showKey) VisualTransformation.None else PasswordVisualTransformation(),
-            colors = fieldColors()
+        SectionTitle("OpenRouter")
+        Field("API Key", apiKey, { apiKey = it; saved = false }, "sk-or-...", secret = true, hasSaved = s.hasKey)
+        Field("Model (cadangan otomatis: openrouter/auto)", model, { model = it; saved = false })
+
+        SectionTitle("OmniRoute / endpoint kompatibel OpenAI")
+        Text(
+            "Dipakai sebagai cadangan otomatis kalau OpenRouter limit atau error (atau jadi utama bila dicentang).",
+            color = Color.Gray, fontSize = 12.sp
         )
-        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Checkbox(checked = showKey, onCheckedChange = { showKey = it })
-            Text("Tampilkan key", color = Color.White)
+        Field("Base URL", omniUrl, { omniUrl = it; saved = false }, "http://192.168.1.10:20128/v1")
+        Field("API Key (boleh kosong untuk server lokal)", omniKey, { omniKey = it; saved = false }, secret = true, hasSaved = s.hasOmniKey)
+        Field("Model", omniModel, { omniModel = it; saved = false }, "kosong = auto")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = omniFirst, onCheckedChange = { omniFirst = it; saved = false })
+            Spacer(Modifier.width(12.dp))
+            Text("Pakai OmniRoute lebih dulu", color = Color.White)
         }
 
-        Spacer(Modifier.height(16.dp))
-        Text("Model (cadangan otomatis: openrouter/auto)", color = Color.White)
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = model,
-            onValueChange = { model = it; saved = false },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            colors = fieldColors()
+        SectionTitle("GitHub (wadah kode)")
+        Text(
+            "Agent menyimpan file ke repo ini, GitHub Actions membuild, lalu Debugger memperbaiki error otomatis. " +
+                "Token fine-grained: Contents (RW), Workflows (RW), Actions (Read).",
+            color = Color.Gray, fontSize = 12.sp
         )
+        Field("Token", ghToken, { ghToken = it; saved = false }, "github_pat_...", secret = true, hasSaved = s.hasGhToken)
+        Field("Repo", ghRepo, { ghRepo = it; saved = false }, "username/nama-repo")
+        Field("Branch", ghBranch, { ghBranch = it; saved = false }, "main")
 
-        Spacer(Modifier.height(16.dp))
-        Text("Project Bible (selalu dikirim ke semua agent)", color = Color.White)
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = bible,
-            onValueChange = { bible = it; saved = false },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 160.dp),
-            colors = fieldColors()
+        SectionTitle("Project Bible")
+        Text("Selalu dikirim ke semua agent", color = Color.Gray, fontSize = 12.sp)
+        Field(
+            "Isi Bible", bible, { bible = it; saved = false },
+            singleLine = false, modifier = Modifier.heightIn(min = 160.dp)
         )
 
         Spacer(Modifier.height(20.dp))
         Button(
-            onClick = { vm.saveSettings(apiKey, model, bible); apiKey = ""; saved = true },
+            onClick = {
+                vm.saveSettings(
+                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, ghRepo, ghBranch, bible)
+                )
+                saved = true
+            },
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF))
         ) { Text("Simpan") }
         if (saved) Text("Tersimpan ✓", color = Color(0xFF00E676))
 
         Spacer(Modifier.height(24.dp))
-        Text("PixelForge v0.1.0-alpha\nPersonal use • Multi-agent living office", color = Color.Gray)
+        Text("PixelForge v0.2.0-alpha\nPersonal use • Multi-agent living office", color = Color.Gray)
     }
 }

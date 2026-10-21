@@ -18,6 +18,7 @@ enum class AgentStatus {
     REPORTING,
     WORKING,
     WAITING_APPROVAL,
+    PAUSED,
     DONE
 }
 

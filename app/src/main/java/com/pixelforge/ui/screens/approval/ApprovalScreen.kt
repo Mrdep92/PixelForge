@@ -20,6 +20,8 @@ fun ApprovalScreen(vm: MainViewModel) {
     val plan by vm.plan.collectAsStateWithLifecycle()
     val approvals by vm.approvals.collectAsStateWithLifecycle()
     val busy by vm.busy.collectAsStateWithLifecycle()
+    val unfinished by vm.unfinished.collectAsStateWithLifecycle()
+    val canResume by vm.canResume.collectAsStateWithLifecycle()
     val p = plan
 
     Column(
@@ -29,7 +31,23 @@ fun ApprovalScreen(vm: MainViewModel) {
         Spacer(Modifier.height(12.dp))
 
         if (p == null || p.status != TaskStatus.AWAITING_APPROVAL) {
-            Text("Tidak ada rencana yang menunggu persetujuan.", color = Color.Gray)
+            if (canResume) {
+                ReportCard(
+                    "⏸ Proses terhenti",
+                    "Progres tersimpan. Biasanya karena limit/jaringan LLM atau build GitHub belum selesai." +
+                        if (unfinished.isNotEmpty())
+                            "\n\nAgent tertunda: " + unfinished.joinToString { it.agentRole.name.lowercase() }
+                        else "\n\nTahap build/debug di GitHub belum selesai."
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(
+                    onClick = { vm.resume() },
+                    enabled = !busy,
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676), contentColor = Color.Black)
+                ) { Text(if (busy) "Sedang berjalan..." else "Lanjutkan") }
+            } else {
+                Text("Tidak ada rencana yang menunggu persetujuan.", color = Color.Gray)
+            }
         } else {
             LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 item {

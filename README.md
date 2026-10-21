@@ -46,6 +46,12 @@ Setelah sync pertama, bisa juga lewat terminal (sekali jalankan `gradle wrapper`
 The APK will be at:
 `app/build/outputs/apk/debug/app-debug.apk`
 
+## Fitur v0.2
+
+- **Multi-provider LLM**: OpenRouter + OmniRoute (atau endpoint OpenAI-compatible lain). Kena limit → otomatis pindah provider; kalau semuanya gagal, progres disimpan dan bisa **Lanjutkan** dari tab Approvals.
+- **Workspace**: agent menulis file (blok `=== FILE: path ===`) ke folder project di app; lihat di tab Files.
+- **GitHub sebagai wadah kode**: file di-commit ke repo, GitHub Actions membuild, Debugger membaca log error dan memperbaiki otomatis (maks 3x).
+
 ## Status
 
 Sudah jalan: Approval Gate asli (Architect → laporan agent → Approve/Reject → eksekusi paralel), OpenRouter dengan fallback model, API key terenkripsi, chat & Project Bible tersimpan di Room, kantor pixel dengan gerak idle.
