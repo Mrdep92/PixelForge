@@ -69,6 +69,7 @@ fun SettingsScreen(vm: MainViewModel) {
     var omniKey by remember(s) { mutableStateOf("") }
     var omniModel by remember(s) { mutableStateOf(s.omniModel) }
     var omniFirst by remember(s) { mutableStateOf(s.omniFirst) }
+    var allowPaid by remember(s) { mutableStateOf(s.allowPaid) }
     var ghToken by remember(s) { mutableStateOf("") }
     var bible by remember(s) { mutableStateOf(s.bible) }
     var saved by remember { mutableStateOf(false) }
@@ -85,7 +86,16 @@ fun SettingsScreen(vm: MainViewModel) {
 
         SectionTitle("OpenRouter")
         Field("API Key", apiKey, { apiKey = it; saved = false }, "sk-or-...", secret = true, hasSaved = s.hasKey)
-        Field("Model (cadangan otomatis: openrouter/auto)", model, { model = it; saved = false })
+        Field("Model (kosong = pilih otomatis dari model gratis)", model, { model = it; saved = false }, "contoh: vendor/nama-model:free")
+        Text(
+            "Daftar model gratis diambil langsung dari OpenRouter. Model tanpa akhiran :free dilewati supaya saldo tidak terpakai.",
+            color = Color.Gray, fontSize = 12.sp
+        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = allowPaid, onCheckedChange = { allowPaid = it; saved = false })
+            Spacer(Modifier.width(12.dp))
+            Text("Izinkan model berbayar (saldo bisa terpotong)", color = Color.White)
+        }
 
         SectionTitle("OmniRoute / endpoint kompatibel OpenAI")
         Text(
@@ -103,8 +113,10 @@ fun SettingsScreen(vm: MainViewModel) {
 
         SectionTitle("GitHub (wadah kode)")
         Text(
-            "Agent menyimpan file ke repo project, GitHub Actions membuild, lalu Debugger memperbaiki error otomatis. " +
-                "Token fine-grained: Contents (RW), Workflows (RW), Actions (Read). Untuk agent Repo membuat repo baru, token perlu izin pembuatan repo (Administration: RW).",
+            "Agent menyimpan file ke repo project, GitHub Actions membuild, lalu Debugger memperbaiki error otomatis.\n\n" +
+                "Agar setiap project bisa punya repo sendiri, token harus mencakup SEMUA repo, bukan satu repo saja. Dua pilihan:\n" +
+                "• Classic (paling mudah): github.com/settings/tokens → Generate new token (classic) → centang `repo` dan `workflow`.\n" +
+                "• Fine-grained: pilih All repositories, lalu izin Contents (RW), Workflows (RW), Actions (Read), Administration (RW).",
             color = Color.Gray, fontSize = 12.sp
         )
         Field("Token", ghToken, { ghToken = it; saved = false }, "github_pat_...", secret = true, hasSaved = s.hasGhToken)
@@ -124,7 +136,7 @@ fun SettingsScreen(vm: MainViewModel) {
         Button(
             onClick = {
                 vm.saveSettings(
-                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, bible)
+                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, bible, allowPaid)
                 )
                 saved = true
             },
@@ -134,6 +146,6 @@ fun SettingsScreen(vm: MainViewModel) {
         if (saved) Text("Tersimpan ✓", color = Color(0xFF00E676))
 
         Spacer(Modifier.height(24.dp))
-        Text("PixelForge v0.4.0-alpha\nPersonal use • Multi-agent living office", color = Color.Gray)
+        Text("PixelForge v0.4.1-alpha\nPersonal use • Multi-agent living office", color = Color.Gray)
     }
 }

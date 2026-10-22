@@ -13,7 +13,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
-class GitHubException(message: String) : Exception(message)
+open class GitHubException(message: String) : Exception(message)
+
+/** Token tidak boleh membuat repo baru (biasanya token fine-grained yang hanya mencakup satu repo). */
+class RepoDeniedException(val repoName: String, message: String) : GitHubException(message)
 
 data class CiRun(val id: Long, val conclusion: String, val url: String)
 
@@ -72,6 +75,21 @@ class GitHubClient(private val token: String, repo: String, private val branch: 
 
     private fun b64(s: String): String = Base64.encodeToString(s.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
 
+    /** Nama akun pemilik token. */
+    suspend fun login(): String {
+        val r = callUrl(HttpMethod.Get, "https://api.github.com/user")
+        if (r.code == 401) throw GitHubException("Token GitHub salah atau kedaluwarsa.")
+        return obj(r, "Cek akun").get("login").asString
+    }
+
+    /** Info repo kalau token bisa melihatnya, null kalau tidak ada / tidak ada akses. */
+    suspend fun findRepo(fullName: String): RepoInfo? {
+        val r = callUrl(HttpMethod.Get, "https://api.github.com/repos/${fullName.trim()}")
+        if (r.code == 404 || r.code == 403) return null
+        val o = obj(r, "Cek repo")
+        return RepoInfo(o.get("full_name").asString, o.get("default_branch").asString, o.get("html_url").asString)
+    }
+
     /** Agent Repo: buat repo baru (dengan README awal supaya langsung siap di-commit). */
     suspend fun createRepo(name: String, description: String, isPrivate: Boolean): RepoInfo {
         val body = JsonObject().apply {
@@ -94,9 +112,11 @@ class GitHubClient(private val token: String, repo: String, private val branch: 
         }
         if (r.code == 401) throw GitHubException("Token GitHub salah atau kedaluwarsa.")
         if (r.code == 403 || r.code == 404) {
-            throw GitHubException(
-                "Token tidak punya izin membuat repo baru (HTTP ${r.code}: ${msgOf(r.body)}). " +
-                    "Buat repo kosong manual di https://github.com/new?name=$name lalu isi nama repo lewat tombol ✎ di bar project."
+            throw RepoDeniedException(
+                name,
+                "Token ini tidak boleh membuat repo baru (HTTP ${r.code}: ${msgOf(r.body)}). " +
+                    "Biasanya karena token hanya mencakup satu repo. Solusi tercepat: buat repo kosong lewat tombol di bawah, " +
+                    "lalu ganti token di Settings dengan token yang mencakup semua repo (lihat petunjuk di Settings)."
             )
         }
         throw GitHubException("Gagal membuat repo → HTTP ${r.code}: ${msgOf(r.body)}")

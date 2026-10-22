@@ -14,6 +14,9 @@ class StateStore(context: Context) {
         e.apply()
     }
 
+    fun saveRaw(key: String, value: String) = prefs.edit().putString(key, value).apply()
+    fun loadRaw(key: String): String? = prefs.getString(key, null)
+
     fun <T> load(key: String, type: Class<T>): T? = runCatching {
         prefs.getString(key, null)?.let { gson.fromJson(it, type) }
     }.getOrNull()

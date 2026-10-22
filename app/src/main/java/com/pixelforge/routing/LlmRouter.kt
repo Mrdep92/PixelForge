@@ -19,7 +19,9 @@ data class Provider(
     val baseUrl: String,
     val apiKey: String,
     val models: List<String>,
-    val headers: Map<String, String> = emptyMap()
+    val headers: Map<String, String> = emptyMap(),
+    /** Kalau true, model tanpa akhiran :free dilewati (mencegah tagihan tak sengaja). */
+    val freeOnly: Boolean = false
 )
 
 /** Semua provider gagal (limit / jaringan / key salah). Progres kerja harus disimpan lalu dilanjutkan nanti. */
@@ -63,6 +65,10 @@ class LlmRouter(private val providers: List<Provider>) {
         var rateLimited = false
         for (p in providers) {
             for (model in p.models) {
+                if (p.freeOnly && !FreeModels.isFree(model)) {
+                    errors += "${p.name}/$model: dilewati (bukan model gratis)"
+                    continue
+                }
                 var attempt = 0
                 while (attempt < 2) {
                     attempt++

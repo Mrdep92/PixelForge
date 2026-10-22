@@ -18,9 +18,15 @@ class SecureStore(context: Context) {
         get() = prefs.getString("api_key", "") ?: ""
         set(v) = prefs.edit().putString("api_key", v.trim()).apply()
 
+    /** Kosong = pilih otomatis dari daftar model gratis. Nilai lama "openrouter/auto" dianggap kosong. */
     var model: String
-        get() = prefs.getString("model", DEFAULT_MODEL) ?: DEFAULT_MODEL
-        set(v) = prefs.edit().putString("model", v.trim().ifBlank { DEFAULT_MODEL }).apply()
+        get() = (prefs.getString("model", "") ?: "").trim().let { if (it == "openrouter/auto" || it == "auto") "" else it }
+        set(v) = prefs.edit().putString("model", v.trim()).apply()
+
+    /** Default mati: hanya model :free yang dipakai di OpenRouter. */
+    var allowPaid: Boolean
+        get() = prefs.getBoolean("allow_paid", false)
+        set(v) = prefs.edit().putBoolean("allow_paid", v).apply()
 
     // OmniRoute / endpoint kompatibel OpenAI lainnya
     var omniUrl: String
@@ -46,8 +52,4 @@ class SecureStore(context: Context) {
     var ghBranch: String
         get() = prefs.getString("gh_branch", "main") ?: "main"
         set(v) = prefs.edit().putString("gh_branch", v.trim().ifBlank { "main" }).apply()
-
-    companion object {
-        const val DEFAULT_MODEL = "openrouter/auto"
-    }
 }

@@ -22,6 +22,8 @@ import com.pixelforge.domain.model.ApprovalRequest
 import com.pixelforge.domain.model.TaskPlan
 import com.pixelforge.github.GitHubClient
 import com.pixelforge.github.GitHubException
+import com.pixelforge.github.RepoDeniedException
+import com.pixelforge.routing.FreeModels
 import com.pixelforge.routing.LlmExhaustedException
 import com.pixelforge.routing.LlmRouter
 import com.pixelforge.routing.Provider
@@ -42,7 +44,8 @@ data class SettingsState(
     val hasOmniKey: Boolean,
     val omniFirst: Boolean,
     val hasGhToken: Boolean,
-    val bible: String
+    val bible: String,
+    val allowPaid: Boolean
 )
 
 /** Isian form Settings. Kolom rahasia yang kosong = tidak diganti. */
@@ -54,8 +57,12 @@ data class SettingsForm(
     val omniModel: String,
     val omniFirst: Boolean,
     val ghToken: String,
-    val bible: String
+    val bible: String,
+    val allowPaid: Boolean
 )
+
+/** Repo belum bisa dibuat otomatis: pengguna diminta membuatnya sendiri lalu menghubungkan. */
+data class RepoHelp(val name: String, val isPrivate: Boolean)
 
 /** Repo GitHub milik satu project. */
 data class ProjectMeta(val repo: String = "", val branch: String = "main")
@@ -113,6 +120,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _meta = MutableStateFlow(loadMeta(_projectId.value))
     val meta = _meta.asStateFlow()
+
+    private val _repoHelp = MutableStateFlow<RepoHelp?>(null)
+    val repoHelp = _repoHelp.asStateFlow()
 
     private val _files = MutableStateFlow(wsFor(_projectId.value).list())
     val files = _files.asStateFlow()
@@ -201,6 +211,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { doCreateRepo(repoName.ifBlank { projectName() }, isPrivate) }
     }
 
+    fun dismissRepoHelp() { _repoHelp.value = null }
+
+    /** Pengguna sudah membuat repo sendiri: cari repo itu di akunnya lalu hubungkan ke project. */
+    fun linkCreatedRepo() {
+        val help = _repoHelp.value ?: return
+        if (_busy.value) return
+        val token = store.ghToken
+        viewModelScope.launch {
+            if (token.isBlank()) {
+                post("SYSTEM", "system", "⚠ Isi token GitHub di Settings dulu.")
+                return@launch
+            }
+            _busy.value = true
+            val gh = GitHubClient(token, "", "main")
+            try {
+                val full = "${gh.login()}/${help.name}"
+                val info = gh.findRepo(full)
+                if (info == null) {
+                    post(
+                        "SYSTEM", "system",
+                        "⚠ Repo $full belum terlihat. Pastikan repo sudah dibuat dengan nama persis itu, dan token punya akses ke repo tersebut " +
+                            "(token fine-grained yang hanya mencakup satu repo tidak akan melihat repo baru)."
+                    )
+                } else {
+                    setMeta(ProjectMeta(info.fullName, info.defaultBranch))
+                    _repoHelp.value = null
+                    post("AGENT", "assistant", "Repo terhubung: ${info.url}\nBranch: `${info.defaultBranch}`.", "REPO")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                post("SYSTEM", "system", "⚠ ${e.message}")
+            } finally {
+                gh.close()
+                _busy.value = false
+            }
+        }
+    }
+
     private fun slug(s: String): String {
         val x = s.lowercase().replace(Regex("[^a-z0-9._-]+"), "-").trim('-', '.')
         return x.ifBlank { "pixelforge-project" }.take(80)
@@ -227,6 +276,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             orch.announce(AgentRole.REPO, AgentStatus.IDLE, null)
         } catch (e: CancellationException) {
             throw e
+        } catch (e: RepoDeniedException) {
+            _repoHelp.value = RepoHelp(e.repoName, isPrivate)
+            post("SYSTEM", "system", "⚠ ${e.message}")
+            orch.announce(AgentRole.REPO, AgentStatus.IDLE, null)
         } catch (e: Exception) {
             post("SYSTEM", "system", "⚠ ${e.message}")
             orch.announce(AgentRole.REPO, AgentStatus.IDLE, null)
@@ -246,7 +299,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         hasOmniKey = store.omniKey.isNotBlank(),
         omniFirst = store.omniFirst,
         hasGhToken = store.ghToken.isNotBlank(),
-        bible = _bible.value
+        bible = _bible.value,
+        allowPaid = store.allowPaid
     )
 
     fun saveSettings(f: SettingsForm) {
@@ -256,6 +310,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (f.omniKey.isNotBlank()) store.omniKey = f.omniKey
         store.omniModel = f.omniModel
         store.omniFirst = f.omniFirst
+        store.allowPaid = f.allowPaid
         if (f.ghToken.isNotBlank()) store.ghToken = f.ghToken
         _bible.value = f.bible
         _settings.value = readSettings()
@@ -265,16 +320,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Daftar model gratis OpenRouter; diperbarui paling sering sekali per 12 jam, sisanya dari simpanan. */
+    private suspend fun freeCatalog(): List<String> {
+        val cached = stateStore.loadRaw("free_models")?.split("\n")?.filter { it.isNotBlank() } ?: emptyList()
+        val at = stateStore.loadRaw("free_models_at")?.toLongOrNull() ?: 0L
+        if (cached.isNotEmpty() && System.currentTimeMillis() - at < 12 * 3600_000L) return cached
+        val fresh = FreeModels.fetch()
+        if (fresh.isNotEmpty()) {
+            stateStore.saveRaw("free_models", fresh.joinToString("\n"))
+            stateStore.saveRaw("free_models_at", System.currentTimeMillis().toString())
+            return fresh
+        }
+        return cached
+    }
+
     /** Urutan provider: OpenRouter dan/atau OmniRoute; kalau satu limit, otomatis pindah ke yang lain. */
-    private fun buildProviders(): List<Provider> {
+    private suspend fun buildProviders(): List<Provider> {
         val list = mutableListOf<Provider>()
         if (store.apiKey.isNotBlank()) {
             list += Provider(
                 name = "OpenRouter",
                 baseUrl = "https://openrouter.ai/api/v1",
                 apiKey = store.apiKey,
-                models = listOf(store.model, "openrouter/auto").distinct(),
-                headers = mapOf("HTTP-Referer" to "https://pixelforge.app", "X-Title" to "PixelForge")
+                models = FreeModels.candidates(store.model, freeCatalog(), store.allowPaid),
+                headers = mapOf("HTTP-Referer" to "https://pixelforge.app", "X-Title" to "PixelForge"),
+                freeOnly = !store.allowPaid
             )
         }
         if (store.omniUrl.isNotBlank()) {

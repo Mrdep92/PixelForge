@@ -17,6 +17,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -32,6 +33,8 @@ fun ChatScreen(vm: MainViewModel) {
     val busy by vm.busy.collectAsStateWithLifecycle()
     val agents by vm.agents.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
+    val repoHelp by vm.repoHelp.collectAsStateWithLifecycle()
+    val uriHandler = LocalUriHandler.current
     var confirmClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
@@ -104,6 +107,32 @@ fun ChatScreen(vm: MainViewModel) {
         if (busy) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), color = Color(0xFF00E5FF))
             Text("Agent sedang bekerja...", color = Color.Gray, fontSize = 12.sp)
+        }
+
+        repoHelp?.let { help ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .background(Color(0xFF16213E), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                Text("Hubungkan repo \"${help.name}\"", color = Color(0xFFFFAB40), fontSize = 13.sp)
+                Text(
+                    "1) Buka GitHub dan buat repo dengan nama itu. 2) Kembali ke sini, tekan Sudah dibuat.",
+                    color = Color.White, fontSize = 12.sp
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        val vis = if (help.isPrivate) "private" else "public"
+                        uriHandler.openUri("https://github.com/new?name=${help.name}&visibility=$vis")
+                    }) { Text("Buka GitHub", color = Color(0xFF00E5FF)) }
+                    TextButton(enabled = !busy, onClick = { vm.linkCreatedRepo() }) {
+                        Text("Sudah dibuat", color = Color(0xFF00E676))
+                    }
+                    TextButton(onClick = { vm.dismissRepoHelp() }) { Text("Tutup", color = Color.Gray) }
+                }
+            }
         }
 
         if (confirmClear) {
