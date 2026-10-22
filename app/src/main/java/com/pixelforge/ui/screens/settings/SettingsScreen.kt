@@ -69,6 +69,8 @@ fun SettingsScreen(vm: MainViewModel) {
     var omniKey by remember(s) { mutableStateOf("") }
     var omniModel by remember(s) { mutableStateOf(s.omniModel) }
     var omniFirst by remember(s) { mutableStateOf(s.omniFirst) }
+    val meta by vm.meta.collectAsStateWithLifecycle()
+    var omniTrusted by remember(s) { mutableStateOf(s.omniTrusted) }
     var allowPaid by remember(s) { mutableStateOf(s.allowPaid) }
     var ghToken by remember(s) { mutableStateOf("") }
     var bible by remember(s) { mutableStateOf(s.bible) }
@@ -110,6 +112,11 @@ fun SettingsScreen(vm: MainViewModel) {
             Spacer(Modifier.width(12.dp))
             Text("Pakai OmniRoute lebih dulu", color = Color.White)
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = omniTrusted, onCheckedChange = { omniTrusted = it; saved = false })
+            Spacer(Modifier.width(12.dp))
+            Text("OmniRoute tepercaya (boleh untuk project privat)", color = Color.White)
+        }
 
         SectionTitle("GitHub (wadah kode)")
         Text(
@@ -125,6 +132,30 @@ fun SettingsScreen(vm: MainViewModel) {
             color = Color.Gray, fontSize = 12.sp
         )
 
+        SectionTitle("Privasi project aktif")
+        if (meta.isPrivate) {
+            Text(
+                "Repo ini PRIVAT. Secara bawaan kodenya tidak dikirim ke model gratis, karena sebagian penyedia model gratis " +
+                    "boleh memakai data untuk memperbaiki produk mereka (cek kebijakan tiap penyedia).",
+                color = Color.Gray, fontSize = 12.sp
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Switch(checked = meta.freeConsent == true, onCheckedChange = { vm.setFreeConsent(it) })
+                Spacer(Modifier.width(12.dp))
+                Text("Izinkan kirim ke provider gratis", color = Color.White)
+            }
+        } else {
+            Text(
+                if (meta.repo.isBlank()) "Belum ada repo. Project dianggap publik."
+                else "Repo ini PUBLIK, semua provider boleh dipakai.",
+                color = Color.Gray, fontSize = 12.sp
+            )
+        }
+        Text(
+            "Semua teks yang dikirim ke model otomatis disaring: API key, token, dan kunci pribadi diganti [REDACTED].",
+            color = Color.Gray, fontSize = 12.sp
+        )
+
         SectionTitle("Project Bible (project aktif)")
         Text("Selalu dikirim ke semua agent", color = Color.Gray, fontSize = 12.sp)
         Field(
@@ -136,7 +167,7 @@ fun SettingsScreen(vm: MainViewModel) {
         Button(
             onClick = {
                 vm.saveSettings(
-                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, bible, allowPaid)
+                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, bible, allowPaid, omniTrusted)
                 )
                 saved = true
             },

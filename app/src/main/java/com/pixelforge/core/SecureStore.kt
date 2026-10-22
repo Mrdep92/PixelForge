@@ -42,6 +42,11 @@ class SecureStore(context: Context) {
         get() = prefs.getBoolean("omni_first", false)
         set(v) = prefs.edit().putBoolean("omni_first", v).apply()
 
+    /** OmniRoute dianggap aman untuk project privat (default mati). */
+    var omniTrusted: Boolean
+        get() = prefs.getBoolean("omni_trusted", false)
+        set(v) = prefs.edit().putBoolean("omni_trusted", v).apply()
+
     // GitHub sebagai wadah kode (commit + build)
     var ghToken: String
         get() = prefs.getString("gh_token", "") ?: ""

@@ -21,7 +21,9 @@ data class Provider(
     val models: List<String>,
     val headers: Map<String, String> = emptyMap(),
     /** Kalau true, model tanpa akhiran :free dilewati (mencegah tagihan tak sengaja). */
-    val freeOnly: Boolean = false
+    val freeOnly: Boolean = false,
+    /** Provider milik sendiri / dipercaya pemilik: boleh menerima kode project privat. */
+    val trusted: Boolean = false
 )
 
 /** Semua provider gagal (limit / jaringan / key salah). Progres kerja harus disimpan lalu dilanjutkan nanti. */
@@ -57,7 +59,8 @@ class LlmRouter(private val providers: List<Provider>) {
         chat(listOf(ChatMessage("system", systemPrompt), ChatMessage("user", userPrompt)))
 
     /** Percakapan multi-putaran (dipakai agent loop). */
-    suspend fun chat(messages: List<ChatMessage>): String {
+    suspend fun chat(rawMessages: List<ChatMessage>): String {
+        val messages = rawMessages.map { m -> m.copy(content = m.content?.let { SecretFilter.redact(it) }) }
         if (providers.isEmpty()) {
             throw LlmExhaustedException("Belum ada provider LLM yang diatur di Settings.", false)
         }

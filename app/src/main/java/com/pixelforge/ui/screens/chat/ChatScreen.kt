@@ -34,6 +34,7 @@ fun ChatScreen(vm: MainViewModel) {
     val agents by vm.agents.collectAsStateWithLifecycle()
     var input by remember { mutableStateOf("") }
     val repoHelp by vm.repoHelp.collectAsStateWithLifecycle()
+    val privacyAsk by vm.privacyAsk.collectAsStateWithLifecycle()
     val uriHandler = LocalUriHandler.current
     var confirmClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
@@ -133,6 +134,22 @@ fun ChatScreen(vm: MainViewModel) {
                     TextButton(onClick = { vm.dismissRepoHelp() }) { Text("Tutup", color = Color.Gray) }
                 }
             }
+        }
+
+        if (privacyAsk) {
+            AlertDialog(
+                onDismissRequest = { vm.answerPrivacy(false) },
+                title = { Text("Project ini privat") },
+                text = {
+                    Text(
+                        "Izinkan kode dan perintah project ini dikirim ke provider model gratis? " +
+                            "Sebagian penyedia gratis boleh memakai data untuk memperbaiki produk mereka. " +
+                            "Rahasia seperti API key tetap disaring. Pilihan ini bisa diubah di Settings."
+                    )
+                },
+                confirmButton = { TextButton(onClick = { vm.answerPrivacy(true) }) { Text("Izinkan") } },
+                dismissButton = { TextButton(onClick = { vm.answerPrivacy(false) }) { Text("Jangan") } }
+            )
         }
 
         if (confirmClear) {

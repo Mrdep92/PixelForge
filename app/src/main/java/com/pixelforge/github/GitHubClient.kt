@@ -20,7 +20,7 @@ class RepoDeniedException(val repoName: String, message: String) : GitHubExcepti
 
 data class CiRun(val id: Long, val conclusion: String, val url: String)
 
-data class RepoInfo(val fullName: String, val defaultBranch: String, val url: String)
+data class RepoInfo(val fullName: String, val defaultBranch: String, val url: String, val isPrivate: Boolean = false)
 
 /** Commit file ke repo, tunggu GitHub Actions, dan ambil log error untuk Debugger. */
 class GitHubClient(private val token: String, repo: String, private val branch: String) {
@@ -87,7 +87,10 @@ class GitHubClient(private val token: String, repo: String, private val branch: 
         val r = callUrl(HttpMethod.Get, "https://api.github.com/repos/${fullName.trim()}")
         if (r.code == 404 || r.code == 403) return null
         val o = obj(r, "Cek repo")
-        return RepoInfo(o.get("full_name").asString, o.get("default_branch").asString, o.get("html_url").asString)
+        return RepoInfo(
+            o.get("full_name").asString, o.get("default_branch").asString, o.get("html_url").asString,
+            o.get("private")?.asBoolean ?: false
+        )
     }
 
     /** Agent Repo: buat repo baru (dengan README awal supaya langsung siap di-commit). */
@@ -104,7 +107,8 @@ class GitHubClient(private val token: String, repo: String, private val branch: 
             return RepoInfo(
                 o.get("full_name").asString,
                 o.get("default_branch").asString,
-                o.get("html_url").asString
+                o.get("html_url").asString,
+                o.get("private")?.asBoolean ?: isPrivate
             )
         }
         if (r.code == 422) {

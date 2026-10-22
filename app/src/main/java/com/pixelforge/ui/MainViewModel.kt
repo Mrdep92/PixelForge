@@ -23,6 +23,8 @@ import com.pixelforge.domain.model.TaskPlan
 import com.pixelforge.github.GitHubClient
 import com.pixelforge.github.GitHubException
 import com.pixelforge.github.RepoDeniedException
+import com.pixelforge.github.RepoInfo
+import com.pixelforge.routing.Privacy
 import com.pixelforge.routing.FreeModels
 import com.pixelforge.routing.LlmExhaustedException
 import com.pixelforge.routing.LlmRouter
@@ -45,7 +47,8 @@ data class SettingsState(
     val omniFirst: Boolean,
     val hasGhToken: Boolean,
     val bible: String,
-    val allowPaid: Boolean
+    val allowPaid: Boolean,
+    val omniTrusted: Boolean
 )
 
 /** Isian form Settings. Kolom rahasia yang kosong = tidak diganti. */
@@ -58,14 +61,22 @@ data class SettingsForm(
     val omniFirst: Boolean,
     val ghToken: String,
     val bible: String,
-    val allowPaid: Boolean
+    val allowPaid: Boolean,
+    val omniTrusted: Boolean
 )
 
 /** Repo belum bisa dibuat otomatis: pengguna diminta membuatnya sendiri lalu menghubungkan. */
 data class RepoHelp(val name: String, val isPrivate: Boolean)
 
 /** Repo GitHub milik satu project. */
-data class ProjectMeta(val repo: String = "", val branch: String = "main")
+data class ProjectMeta(
+    val repo: String = "",
+    val branch: String = "main",
+    /** Repo privat di GitHub → kode tidak dikirim ke provider gratis tanpa izin. */
+    val isPrivate: Boolean = false,
+    /** null = belum ditanya, true = diizinkan, false = ditolak. */
+    val freeConsent: Boolean? = null
+)
 
 /** Progres fase build/debug di GitHub, disimpan per project supaya bisa dilanjutkan. */
 data class CiState(
@@ -202,8 +213,78 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateRepo(repo: String, branch: String) {
         if (_busy.value) return
-        setMeta(ProjectMeta(repo.trim().removePrefix("https://github.com/").trim('/'), branch.trim().ifBlank { "main" }))
+        val full = repo.trim().removePrefix("https://github.com/").trim('/')
+        val br = branch.trim().ifBlank { "main" }
+        val old = _meta.value
+        setMeta(old.copy(repo = full, branch = br, freeConsent = if (full == old.repo) old.freeConsent else null))
+        // Cari tahu repo privat/publik supaya aturan privasi benar.
+        val token = store.ghToken
+        if (full.isNotBlank() && token.isNotBlank()) viewModelScope.launch {
+            val gh = GitHubClient(token, "", "main")
+            try {
+                gh.findRepo(full)?.let { info -> setMeta(_meta.value.copy(isPrivate = info.isPrivate)) }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            } finally {
+                gh.close()
+            }
+        }
     }
+
+    /** Terapkan repo baru ke project aktif; izin privasi direset kalau repo-nya berbeda. */
+    private fun setRepo(info: RepoInfo) {
+        val old = _meta.value
+        setMeta(
+            ProjectMeta(
+                info.fullName, info.defaultBranch, info.isPrivate,
+                if (info.fullName == old.repo) old.freeConsent else null
+            )
+        )
+    }
+
+    // ---------- Privasi ----------
+
+    private val _privacyAsk = MutableStateFlow(false)
+    val privacyAsk = _privacyAsk.asStateFlow()
+    private var privacyRetry: (() -> Unit)? = null
+
+    /** Provider yang boleh dipakai untuk project aktif. Kosong = berhenti (pesan sudah dikirim ke chat). */
+    private suspend fun allowedProviders(retry: () -> Unit): List<Provider> {
+        val all = buildProviders()
+        if (all.isEmpty()) {
+            post("SYSTEM", "system", "⚠ Belum ada provider LLM. Isi API key OpenRouter atau URL OmniRoute di tab Settings.")
+            return emptyList()
+        }
+        val m = _meta.value
+        val allowed = Privacy.apply(all, m.isPrivate, m.freeConsent == true).providers
+        if (allowed.isNotEmpty()) return allowed
+        if (m.freeConsent == null) {
+            privacyRetry = retry
+            _privacyAsk.value = true
+        } else {
+            post(
+                "SYSTEM", "system",
+                "🔒 Project ini privat dan tidak ada provider yang diizinkan. Izinkan provider gratis di Settings > Privasi project, " +
+                    "tandai OmniRoute sebagai tepercaya, atau pakai model berbayar."
+            )
+        }
+        return emptyList()
+    }
+
+    fun answerPrivacy(allow: Boolean) {
+        _privacyAsk.value = false
+        setMeta(_meta.value.copy(freeConsent = allow))
+        val retry = privacyRetry
+        privacyRetry = null
+        if (allow) retry?.invoke()
+        else viewModelScope.launch {
+            post("SYSTEM", "system", "🔒 Dibatalkan. Kode project privat tidak dikirim ke provider gratis.")
+        }
+    }
+
+    /** Ubah izin dari Settings (hanya relevan untuk project privat). */
+    fun setFreeConsent(allow: Boolean) = setMeta(_meta.value.copy(freeConsent = allow))
 
     /** Agent Repo: membuat repo GitHub untuk project aktif. */
     fun createRepo(repoName: String, isPrivate: Boolean) {
@@ -235,7 +316,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             "(token fine-grained yang hanya mencakup satu repo tidak akan melihat repo baru)."
                     )
                 } else {
-                    setMeta(ProjectMeta(info.fullName, info.defaultBranch))
+                    setRepo(info)
                     _repoHelp.value = null
                     post("AGENT", "assistant", "Repo terhubung: ${info.url}\nBranch: `${info.defaultBranch}`.", "REPO")
                 }
@@ -269,7 +350,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         try {
             post("SYSTEM", "system", "🏗 Agent Repo membuat repo \"$name\" (${if (isPrivate) "privat" else "publik"})...")
             val info = gh.createRepo(name, "Dibuat oleh PixelForge — ${projectName()}", isPrivate)
-            setMeta(ProjectMeta(info.fullName, info.defaultBranch))
+            setRepo(info)
             post("AGENT", "assistant", "Repo siap: ${info.url}\nBranch: `${info.defaultBranch}`. Agent akan commit ke repo ini.", "REPO")
             orch.announce(AgentRole.REPO, AgentStatus.DONE, "Repo siap ✓")
             delay(4000)
@@ -300,7 +381,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         omniFirst = store.omniFirst,
         hasGhToken = store.ghToken.isNotBlank(),
         bible = _bible.value,
-        allowPaid = store.allowPaid
+        allowPaid = store.allowPaid,
+        omniTrusted = store.omniTrusted
     )
 
     fun saveSettings(f: SettingsForm) {
@@ -311,6 +393,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         store.omniModel = f.omniModel
         store.omniFirst = f.omniFirst
         store.allowPaid = f.allowPaid
+        store.omniTrusted = f.omniTrusted
         if (f.ghToken.isNotBlank()) store.ghToken = f.ghToken
         _bible.value = f.bible
         _settings.value = readSettings()
@@ -352,7 +435,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 name = "OmniRoute",
                 baseUrl = store.omniUrl,
                 apiKey = store.omniKey,
-                models = listOf(store.omniModel.ifBlank { "auto" })
+                models = listOf(store.omniModel.ifBlank { "auto" }),
+                trusted = store.omniTrusted
             )
         }
         return if (store.omniFirst) list.reversed() else list
@@ -360,16 +444,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- Perintah → rencana ----------
 
-    fun send(command: String) {
+    fun send(command: String) = doSend(command, true)
+
+    private fun doSend(command: String, echo: Boolean) {
         val text = command.trim()
         if (text.isEmpty() || _busy.value) return
         viewModelScope.launch {
-            post("USER", "user", text)
-            val providers = buildProviders()
-            if (providers.isEmpty()) {
-                post("SYSTEM", "system", "⚠ Belum ada provider LLM. Isi API key OpenRouter atau URL OmniRoute di tab Settings.")
-                return@launch
-            }
+            if (echo) post("USER", "user", text)
+            val providers = allowedProviders { doSend(text, false) }
+            if (providers.isEmpty()) return@launch
             _busy.value = true
             val router = LlmRouter(providers)
             try {
@@ -412,11 +495,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun runPipeline() {
-        val providers = buildProviders()
-        if (providers.isEmpty()) {
-            post("SYSTEM", "system", "⚠ Belum ada provider LLM. Isi di tab Settings.")
-            return
-        }
+        val providers = allowedProviders { viewModelScope.launch { runPipeline() } }
+        if (providers.isEmpty()) return
         _busy.value = true
         val ctx = getApplication<Application>()
         val svc = Intent(ctx, AgentForegroundService::class.java)
