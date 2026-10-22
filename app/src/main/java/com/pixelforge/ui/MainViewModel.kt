@@ -9,6 +9,7 @@ import com.pixelforge.PixelForgeApp
 import com.pixelforge.agents.AgentLoop
 import com.pixelforge.agents.AgentOrchestrator
 import com.pixelforge.agents.Executor
+import com.pixelforge.agents.ProtectedFiles
 import com.pixelforge.agents.ToolProtocol
 import com.pixelforge.core.AgentForegroundService
 import com.pixelforge.core.StateStore
@@ -28,6 +29,7 @@ import com.pixelforge.routing.Privacy
 import com.pixelforge.routing.FreeModels
 import com.pixelforge.routing.LlmExhaustedException
 import com.pixelforge.routing.LlmRouter
+import com.pixelforge.routing.QuotaMeter
 import com.pixelforge.routing.Provider
 import com.pixelforge.workspace.Workspace
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -48,7 +50,8 @@ data class SettingsState(
     val hasGhToken: Boolean,
     val bible: String,
     val allowPaid: Boolean,
-    val omniTrusted: Boolean
+    val omniTrusted: Boolean,
+    val orCredits: Boolean
 )
 
 /** Isian form Settings. Kolom rahasia yang kosong = tidak diganti. */
@@ -62,7 +65,8 @@ data class SettingsForm(
     val ghToken: String,
     val bible: String,
     val allowPaid: Boolean,
-    val omniTrusted: Boolean
+    val omniTrusted: Boolean,
+    val orCredits: Boolean
 )
 
 /** Repo belum bisa dibuat otomatis: pengguna diminta membuatnya sendiri lalu menghubungkan. */
@@ -93,6 +97,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val db = pf.db
     private val store = pf.store
     private val stateStore = StateStore(app)
+
+    /** Meteran jatah semua provider; hitungan harian disimpan supaya tidak hilang saat app ditutup. */
+    private val quotaMeter = QuotaMeter().also { m ->
+        m.restore(stateStore.loadRaw("quota"))
+        m.onChange = { stateStore.saveRaw("quota", m.export()) }
+    }
+    val quota: StateFlow<List<QuotaMeter.Snapshot>> = quotaMeter.snapshots
 
     // ---------- Project aktif: tiap project punya orchestrator, workspace, chat, bible, repo sendiri ----------
 
@@ -382,7 +393,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         hasGhToken = store.ghToken.isNotBlank(),
         bible = _bible.value,
         allowPaid = store.allowPaid,
-        omniTrusted = store.omniTrusted
+        omniTrusted = store.omniTrusted,
+        orCredits = store.orCredits
     )
 
     fun saveSettings(f: SettingsForm) {
@@ -394,6 +406,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         store.omniFirst = f.omniFirst
         store.allowPaid = f.allowPaid
         store.omniTrusted = f.omniTrusted
+        store.orCredits = f.orCredits
         if (f.ghToken.isNotBlank()) store.ghToken = f.ghToken
         _bible.value = f.bible
         _settings.value = readSettings()
@@ -428,7 +441,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 models = FreeModels.candidates(store.model, freeCatalog(), store.allowPaid),
                 headers = mapOf("HTTP-Referer" to "https://pixelforge.app", "X-Title" to "PixelForge"),
                 freeOnly = !store.allowPaid,
-                modelsDeclarePricing = true
+                modelsDeclarePricing = true,
+                limits = if (store.orCredits) QuotaMeter.OPENROUTER_FREE_WITH_CREDITS else QuotaMeter.OPENROUTER_FREE,
+                limitPerAccount = true
             )
         }
         if (store.omniUrl.isNotBlank()) {
@@ -455,7 +470,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val providers = allowedProviders { doSend(text, false) }
             if (providers.isEmpty()) return@launch
             _busy.value = true
-            val router = LlmRouter(providers)
+            val router = LlmRouter(providers, quotaMeter)
             try {
                 val p = orchestrator.submitCommand(_projectId.value, text, fullContext()) { s, u -> router.chat(s, u) }
                 post("AGENT", "assistant", p.architectPlan, "ARCHITECT")
@@ -502,7 +517,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val ctx = getApplication<Application>()
         val svc = Intent(ctx, AgentForegroundService::class.java)
         runCatching { ContextCompat.startForegroundService(ctx, svc) }
-        val router = LlmRouter(providers)
+        val router = LlmRouter(providers, quotaMeter)
         try {
             if (orchestrator.hasWork()) {
                 val done = orchestrator.execute(
@@ -534,7 +549,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Simpan file dari output agent ke workspace; chat hanya menampilkan ringkasannya. */
     private suspend fun handleOutput(role: AgentRole, out: String) {
-        val files = Workspace.extractFiles(out)
+        val all = Workspace.extractFiles(out)
+        val blocked = all.filter { ProtectedFiles.violation(it.path, workspace.exists(it.path)) != null }
+        val files = all - blocked.toSet()
         var text = Workspace.stripFiles(out).trim()
         if (files.isNotEmpty()) {
             val written = workspace.write(files)
@@ -544,6 +561,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (cut.isNotEmpty()) {
                 text += "\n\n⚠ Jawaban terpotong (batas token), file ini mungkin tidak lengkap: " + cut.joinToString()
             }
+        }
+        if (blocked.isNotEmpty()) {
+            text += "\n\n🛡 Dilewati (file infrastruktur dilindungi): " + blocked.joinToString { it.path }
         }
         post("AGENT", "assistant", text.trim(), role.name)
     }

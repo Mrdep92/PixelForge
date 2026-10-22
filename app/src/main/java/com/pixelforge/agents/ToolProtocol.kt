@@ -45,6 +45,7 @@ object ToolProtocol {
             "- Keep every reply small (a few files or edits at a time). Long replies get cut off, and incomplete blocks are rejected.\n" +
             "- No markdown code fences around tool blocks. Never invent contents of files you have not read.\n" +
             "- If a tool result says ERROR, fix the problem and try again.\n" +
+            "- Never create or edit gradlew, gradlew.bat or gradle/wrapper/*: the app provides them. Existing CI workflows are read-only.\n" +
             "- If the project can be built or tested and the workspace has no file under .github/workflows/, " +
             "add a GitHub Actions workflow that runs on push (all branches) and workflow_dispatch.\n" +
             "- Finish with a DONE block.\n"

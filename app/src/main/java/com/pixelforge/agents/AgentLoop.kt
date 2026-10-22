@@ -22,11 +22,21 @@ class AgentLoop(
     suspend fun run(system: String, task: String, onStep: suspend (String) -> Unit = {}): Result {
         val msgs = mutableListOf(Msg("system", system), Msg("user", task))
         val changed = linkedSetOf<String>()
+        var nudged = false
         for (turn in 1..maxTurns) {
             val reply = chat(compact(msgs))
             msgs += Msg("assistant", reply)
             val calls = ToolProtocol.parse(reply)
-            if (calls.isEmpty()) return Result(reply.trim(), changed.toList(), turn, true)
+            if (calls.isEmpty()) {
+                // Model membalas tanpa perintah tool dan tanpa DONE: dorong satu kali, jangan anggap selesai.
+                if (!nudged && turn < maxTurns) {
+                    nudged = true
+                    onStep("putaran $turn/$maxTurns — ⏭ dorongan lanjut")
+                    msgs += Msg("user", NUDGE)
+                    continue
+                }
+                return Result(reply.trim(), changed.toList(), turn, true)
+            }
 
             val results = StringBuilder()
             val steps = mutableListOf<String>()
@@ -108,6 +118,7 @@ class AgentLoop(
 
     private fun doWrite(c: ToolProtocol.Call.Write, changed: MutableSet<String>): String {
         if (c.path.isBlank()) return "ERROR: path tidak valid; file tidak ditulis."
+        ProtectedFiles.violation(c.path, exec.read(c.path) != null)?.let { return "ERROR: $it" }
         if (!c.complete) {
             return "ERROR: blok FILE '${c.path}' terpotong (tidak ada END FILE); file TIDAK ditulis. " +
                 "Kirim ulang lebih kecil, atau buat kerangka dulu lalu tambahkan bagiannya dengan EDIT."
@@ -119,6 +130,7 @@ class AgentLoop(
 
     private fun doEdit(c: ToolProtocol.Call.Edit, changed: MutableSet<String>): String {
         if (c.path.isBlank()) return "ERROR: path tidak valid; tidak ada yang diubah."
+        ProtectedFiles.violation(c.path, exec.read(c.path) != null)?.let { return "ERROR: $it" }
         if (!c.complete) {
             return "ERROR: blok EDIT '${c.path}' tidak lengkap/terpotong (butuh SEARCH, =======, REPLACE, dan END EDIT); tidak ada yang diubah."
         }
@@ -147,6 +159,10 @@ class AgentLoop(
     }
 
     private companion object {
+        const val NUDGE =
+            "Your last reply had no tool block and no DONE block, so the task is not finished yet. " +
+                "Continue with tool blocks (LIST, READ, GREP, FILE, EDIT), or send a DONE block with a short summary " +
+                "if the work is truly complete."
         const val MAX_READ = 8000
         const val MAX_CTX = 48_000
     }

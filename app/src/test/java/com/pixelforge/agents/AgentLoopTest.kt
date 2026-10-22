@@ -97,12 +97,93 @@ class AgentLoopTest {
     }
 
     @Test
-    fun plainAnswerEndsLoop() = runBlocking {
-        val loop = AgentLoop(scripted(listOf("Ini jawaban akhir.")), FakeExec())
+    fun plainAnswerGetsOneNudgeThenEnds() = runBlocking {
+        val seen = mutableListOf<List<AgentLoop.Msg>>()
+        val loop = AgentLoop(scripted(listOf("Ini jawaban akhir."), seen), FakeExec())
         val r = loop.run("sys", "task")
         assertTrue(r.finished)
-        assertEquals(1, r.turns)
+        assertEquals(2, r.turns)
         assertEquals("Ini jawaban akhir.", r.summary)
+        assertTrue(seen.last().last { it.role == "user" }.content.contains("not finished"))
+    }
+
+    @Test
+    fun nudgeLetsModelContinueWithTools() = runBlocking {
+        val exec = FakeExec()
+        val loop = AgentLoop(
+            scripted(
+                listOf(
+                    "Saya akan membuat file itu sekarang.",
+                    "=== FILE: a.txt ===\nisi\n=== END FILE ===",
+                    "=== DONE ===\nselesai\n=== END DONE ==="
+                )
+            ),
+            exec
+        )
+        val r = loop.run("sys", "task")
+        assertTrue(r.finished)
+        assertEquals(3, r.turns)
+        assertEquals("isi", exec.files["a.txt"]?.trim())
+    }
+
+    @Test
+    fun doneBlockIsNotNudged() = runBlocking {
+        val loop = AgentLoop(scripted(listOf("=== DONE ===\nok\n=== END DONE ===")), FakeExec())
+        val r = loop.run("sys", "task")
+        assertEquals(1, r.turns)
+    }
+
+    @Test
+    fun wrapperFilesAreRejected() = runBlocking {
+        val exec = FakeExec()
+        val seen = mutableListOf<List<AgentLoop.Msg>>()
+        val loop = AgentLoop(
+            scripted(
+                listOf(
+                    "=== FILE: gradlew ===\n#!/bin/sh\n=== END FILE ===",
+                    "=== DONE ===\nok\n=== END DONE ==="
+                ),
+                seen
+            ),
+            exec
+        )
+        val r = loop.run("sys", "task")
+        assertFalse(exec.files.containsKey("gradlew"))
+        assertTrue(r.changed.isEmpty())
+        assertTrue(seen.last().last { it.role == "user" }.content.contains("dilindungi"))
+    }
+
+    @Test
+    fun existingWorkflowCannotBeEdited() = runBlocking {
+        val path = ".github/workflows/build.yml"
+        val exec = FakeExec(mapOf(path to "name: ci"))
+        val loop = AgentLoop(
+            scripted(
+                listOf(
+                    "=== EDIT: $path ===\n<<<<<<< SEARCH\nname: ci\n=======\nname: x\n>>>>>>> REPLACE\n=== END EDIT ===",
+                    "=== DONE ===\nok\n=== END DONE ==="
+                )
+            ),
+            exec
+        )
+        loop.run("sys", "task")
+        assertEquals("name: ci", exec.files[path])
+    }
+
+    @Test
+    fun newWorkflowCanBeCreated() = runBlocking {
+        val exec = FakeExec()
+        val loop = AgentLoop(
+            scripted(
+                listOf(
+                    "=== FILE: .github/workflows/ci.yml ===\nname: ci\n=== END FILE ===",
+                    "=== DONE ===\nok\n=== END DONE ==="
+                )
+            ),
+            exec
+        )
+        loop.run("sys", "task")
+        assertTrue(exec.files.containsKey(".github/workflows/ci.yml"))
     }
 
     @Test

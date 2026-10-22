@@ -28,6 +28,11 @@ class SecureStore(context: Context) {
         get() = prefs.getBoolean("allow_paid", false)
         set(v) = prefs.edit().putBoolean("allow_paid", v).apply()
 
+    /** Pernah membeli kredit OpenRouter (≥ $10): jatah model :free naik dari 50 menjadi 1.000 permintaan per hari. */
+    var orCredits: Boolean
+        get() = prefs.getBoolean("or_credits", false)
+        set(v) = prefs.edit().putBoolean("or_credits", v).apply()
+
     // OmniRoute / endpoint kompatibel OpenAI lainnya
     var omniUrl: String
         get() = prefs.getString("omni_url", "") ?: ""
