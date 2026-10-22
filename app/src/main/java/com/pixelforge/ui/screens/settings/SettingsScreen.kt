@@ -72,6 +72,8 @@ fun SettingsScreen(vm: MainViewModel) {
     val meta by vm.meta.collectAsStateWithLifecycle()
     var omniTrusted by remember(s) { mutableStateOf(s.omniTrusted) }
     var allowPaid by remember(s) { mutableStateOf(s.allowPaid) }
+    var orCredits by remember(s) { mutableStateOf(s.orCredits) }
+    val quota by vm.quota.collectAsStateWithLifecycle()
     var ghToken by remember(s) { mutableStateOf("") }
     var bible by remember(s) { mutableStateOf(s.bible) }
     var saved by remember { mutableStateOf(false) }
@@ -98,6 +100,31 @@ fun SettingsScreen(vm: MainViewModel) {
             Spacer(Modifier.width(12.dp))
             Text("Izinkan model berbayar (saldo bisa terpotong)", color = Color.White)
         }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Switch(checked = orCredits, onCheckedChange = { orCredits = it; saved = false })
+            Spacer(Modifier.width(12.dp))
+            Text("Pernah beli kredit OpenRouter (≥ \$10): jatah gratis 1.000/hari", color = Color.White)
+        }
+
+        SectionTitle("Jatah per provider")
+        if (quota.isEmpty()) {
+            Text("Belum ada permintaan. Meteran muncul setelah agent memakai model.", color = Color.Gray, fontSize = 12.sp)
+        }
+        quota.forEach { q ->
+            val dayText = if (q.perDay != null) "${q.usedDay}/${q.perDay} hari ini" else "${q.usedDay} hari ini"
+            val minText = if (q.perMinute != null) "${q.usedMinute}/${q.perMinute} per menit" else "${q.usedMinute} per menit"
+            Text(q.provider, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            Text("$dayText • $minText", color = Color.Gray, fontSize = 12.sp)
+            q.reportedRemaining?.let { Text("Sisa menurut server: $it", color = Color.Gray, fontSize = 12.sp) }
+            if (q.blockedUntil != null) {
+                Text("⏸ Ditahan sampai ±" + java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(q.blockedUntil)), color = Color(0xFFFFB300), fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(6.dp))
+        }
+        Text(
+            "Hitungan dibuat aplikasi dan dikoreksi dari header server bila ada. Angka batas gratis bisa berubah di sisi penyedia.",
+            color = Color.Gray, fontSize = 12.sp
+        )
 
         SectionTitle("OmniRoute / endpoint kompatibel OpenAI")
         Text(
@@ -167,7 +194,7 @@ fun SettingsScreen(vm: MainViewModel) {
         Button(
             onClick = {
                 vm.saveSettings(
-                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, bible, allowPaid, omniTrusted)
+                    SettingsForm(apiKey, model, omniUrl, omniKey, omniModel, omniFirst, ghToken, bible, allowPaid, omniTrusted, orCredits)
                 )
                 saved = true
             },
