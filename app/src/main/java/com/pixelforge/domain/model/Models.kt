@@ -78,11 +78,23 @@ data class Message(
     val timestamp: Long = System.currentTimeMillis()
 )
 
+/** Tugas terstruktur dari Architect (satu panggilan). */
+data class AgentTask(
+    val role: AgentRole,
+    val task: String,
+    val files: List<String> = emptyList(),
+    val dependsOn: List<AgentRole> = emptyList()
+)
+
 data class TaskPlan(
     val id: String = UUID.randomUUID().toString(),
     val projectId: String,
     val userCommand: String,
     val architectPlan: String,
+    /** Tugas per agen dari single-call Architect. Kosong = mode lama. */
+    val tasks: List<AgentTask> = emptyList(),
+    /** Estimasi jumlah panggilan LLM untuk seluruh pipeline (rencana + eksekusi). */
+    val estimatedCalls: Int = 0,
     val status: TaskStatus = TaskStatus.PENDING,
     val createdAt: Long = System.currentTimeMillis()
 )

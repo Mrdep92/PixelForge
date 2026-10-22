@@ -23,9 +23,12 @@ data class SavedOrch(
 )
 
 /**
- * Flow: perintah user → Architect bikin rencana → agent lapor → USER APPROVE → eksekusi paralel.
- * Agent yang gagal (limit/jaringan) tidak hilang: tetap di daftar `unfinished` dan bisa dilanjutkan.
- * Posisi agent berupa pecahan 0..1 dari ukuran kantor supaya pas di semua ukuran layar.
+ * Flow hemat kuota (v0.5):
+ * 1. Satu panggilan Architect → rencana terstruktur + tugas tiap agen
+ * 2. User Approve
+ * 3. Pipeline: Coder → Auditor (max 1 putaran perbaikan) + agen lain opsional
+ *
+ * Agent yang gagal (limit/jaringan) tidak hilang: tetap di daftar `unfinished`.
  */
 class AgentOrchestrator(
     private val store: StateStore? = null,
@@ -33,7 +36,6 @@ class AgentOrchestrator(
 ) {
     private val key = "orch:$projectId"
 
-    // Batasi panggilan LLM bersamaan supaya tidak kena rate limit
     private val llmGate = Semaphore(2)
 
     private val _agents = MutableStateFlow(createDefaultAgents())
@@ -64,7 +66,6 @@ class AgentOrchestrator(
         store?.save(key, SavedOrch(_currentPlan.value, _pendingApprovals.value, _unfinished.value))
     }
 
-    /** Dipakai agent non-pipeline (mis. Repo) untuk menampilkan statusnya di kantor. */
     fun announce(role: AgentRole, status: AgentStatus, bubble: String?) = setStatus(role, status, bubble)
 
     fun hasWork(): Boolean = _pendingApprovals.value.isNotEmpty() || _unfinished.value.isNotEmpty()
@@ -80,69 +81,97 @@ class AgentOrchestrator(
         Agent(role = AgentRole.REPO, name = "Repo", positionX = 0.72f, positionY = 0.78f)
     )
 
-    /** Langkah 1–3. Hasilnya menunggu persetujuan user. */
+    /**
+     * Langkah 1: **satu** panggilan LLM.
+     * Architect mengeluarkan rencana + daftar tugas terstruktur.
+     * Tidak ada laporan per-agen tambahan → hemat kuota besar.
+     */
     suspend fun submitCommand(
         projectId: String,
         command: String,
-        projectBible: String,
+        context: String,
         llmCall: LlmCall
     ): TaskPlan {
         resetAgents()
         _unfinished.value = emptyList()
         setStatus(AgentRole.ARCHITECT, AgentStatus.THINKING, "Menyusun rencana...")
 
-        val planText = llmCall(
-            "You are a senior software architect in PixelForge. Reply only with the plan. " +
-                "Reply in the same language as the user's command. " +
-                "If code is needed, list the files (with relative paths) to create or change.",
-            "Project Bible:\n$projectBible\n\nUser command: $command\n\n" +
-                "Create a clear, step-by-step plan. Be concise."
-        )
+        val system = """
+            You are the Architect of PixelForge, a mobile multi-agent office.
+            Reply ONLY with a valid JSON object (no markdown fences, no extra text).
+            Language of all text fields must match the user's command language.
+
+            Schema:
+            {
+              "plan": "short step-by-step plan (max 120 words)",
+              "tasks": [
+                {"role": "CODER"|"AUDITOR"|"DEBUGGER"|"CREATIVE"|"BUSINESS"|"GENERAL", "task": "what this agent must do", "files": ["optional/path"]}
+              ],
+              "estimated_calls": 3
+            }
+
+            Rules:
+            - Prefer CODER + AUDITOR for any coding work.
+            - AUDITOR task must say it will review the Coder output.
+            - Keep estimated_calls realistic (1 plan already used + 1 per agent that will run + optional 1 fix round).
+            - Max 4 tasks.
+        """.trimIndent()
+
+        val user = buildString {
+            if (context.isNotBlank()) append("Context:\n$context\n\n")
+            append("User command: $command")
+        }
+
+        val raw = llmCall(system, user)
+        val parsed = parseArchitectJson(raw, command)
+
         val plan = TaskPlan(
             projectId = projectId,
             userCommand = command,
-            architectPlan = planText,
+            architectPlan = parsed.planText,
+            tasks = parsed.tasks,
+            estimatedCalls = parsed.estimatedCalls,
             status = TaskStatus.AWAITING_APPROVAL
         )
         _currentPlan.value = plan
 
-        val roles = determineRelevantRoles(command)
-        roles.forEach { setStatus(it, AgentStatus.REPORTING, "Menulis laporan...") }
-
-        val approvals = coroutineScope {
-            roles.map { role ->
-                async {
-                    val report = llmGate.withPermit {
-                        llmCall(
-                            "You are the ${role.name} agent. Give a very short report (2-4 sentences) " +
-                                "of what you will do based on this plan:\n$planText\n" +
-                                "Reply in the same language as the user's command.",
-                            "Command: $command\nKeep it under 80 words."
-                        )
-                    }
-                    ApprovalRequest(
-                        taskPlanId = plan.id,
-                        agentId = _agents.value.first { it.role == role }.id,
-                        agentRole = role,
-                        report = report
-                    )
-                }
-            }.awaitAll()
+        // Buat ApprovalRequest dari tasks (tanpa LLM tambahan)
+        val approvals = parsed.tasks.map { t ->
+            val agent = _agents.value.firstOrNull { it.role == t.role }
+                ?: _agents.value.first { it.role == AgentRole.GENERAL }
+            ApprovalRequest(
+                taskPlanId = plan.id,
+                agentId = agent.id,
+                agentRole = t.role,
+                report = t.task,
+                estimatedSteps = t.files
+            )
+        }.ifEmpty {
+            // Fallback jika parsing gagal total
+            listOf(
+                ApprovalRequest(
+                    taskPlanId = plan.id,
+                    agentId = _agents.value.first { it.role == AgentRole.GENERAL }.id,
+                    agentRole = AgentRole.GENERAL,
+                    report = parsed.planText.take(200)
+                )
+            )
         }
 
         _pendingApprovals.value = approvals
         persist()
         setStatus(AgentRole.ARCHITECT, AgentStatus.WAITING_APPROVAL, "Menunggu approval")
-        roles.forEach { setStatus(it, AgentStatus.WAITING_APPROVAL, null) }
+        approvals.forEach { setStatus(it.agentRole, AgentStatus.WAITING_APPROVAL, null) }
         return plan
     }
 
     /**
-     * Langkah 5 (juga dipakai untuk melanjutkan). Semua agent jalan paralel.
-     * @return true kalau semua agent selesai; false kalau masih ada yang tertunda (bisa dilanjutkan).
+     * Langkah 2: eksekusi setelah Approve.
+     * Pipeline: Coder dulu → Auditor (dengan hasil Coder) → max 1 putaran perbaikan.
+     * Agen lain (Creative, Business, …) jalan paralel setelah pipeline inti.
      */
     suspend fun execute(
-        projectBible: String,
+        context: String,
         runner: suspend (AgentRole, String, String) -> String,
         onResult: suspend (AgentRole, String) -> Unit,
         onFailure: suspend (AgentRole, String) -> Unit
@@ -152,42 +181,117 @@ class AgentOrchestrator(
             _unfinished.value = _pendingApprovals.value
             _pendingApprovals.value = emptyList()
         }
-        val todo = _unfinished.value
+        val todo = _unfinished.value.toMutableList()
         if (todo.isEmpty()) return true
 
         _currentPlan.value = plan.copy(status = TaskStatus.IN_PROGRESS)
         persist()
         setStatus(AgentRole.ARCHITECT, AgentStatus.IDLE, null)
-        todo.forEach { setStatus(it.agentRole, AgentStatus.WORKING, "Mengerjakan...") }
 
-        coroutineScope {
-            todo.map { a ->
-                async {
-                    try {
-                        val out = llmGate.withPermit {
-                            runner(
-                                a.agentRole,
-                                "You are the ${a.agentRole.name} agent in PixelForge.\n" +
-                                    "Project Bible (follow strictly):\n$projectBible\n" +
-                                    "Reply in the same language as the user's command.",
-                                "User command: ${plan.userCommand}\n\nApproved plan:\n${plan.architectPlan}\n\n" +
-                                    "Your report: ${a.report}\n\n" +
-                                    "Now do your part. Deliver the concrete output (files, findings, or text)."
-                            )
-                        }
-                        onResult(a.agentRole, out)
-                        _unfinished.update { l -> l.filter { it.id != a.id } }
-                        persist()
-                        setStatus(a.agentRole, AgentStatus.DONE, "Selesai ✓")
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (e: Exception) {
-                        setStatus(a.agentRole, AgentStatus.PAUSED, "⏸ Tertunda")
-                        onFailure(a.agentRole, e.message ?: e.javaClass.simpleName)
-                    }
+        val coderReq = todo.find { it.agentRole == AgentRole.CODER }
+        val auditorReq = todo.find { it.agentRole == AgentRole.AUDITOR }
+        val others = todo.filter { it.agentRole != AgentRole.CODER && it.agentRole != AgentRole.AUDITOR }
+
+        var coderOutput: String? = null
+
+        // --- Pipeline Coder → Auditor (max 1 fix) ---
+        if (coderReq != null) {
+            try {
+                setStatus(AgentRole.CODER, AgentStatus.WORKING, "Coding...")
+                val taskText = plan.tasks.find { it.role == AgentRole.CODER }?.task ?: coderReq.report
+                coderOutput = llmGate.withPermit {
+                    runner(
+                        AgentRole.CODER,
+                        "You are the CODER agent in PixelForge.\nContext:\n$context\nReply in the same language as the user.",
+                        "Command: ${plan.userCommand}\n\nPlan:\n${plan.architectPlan}\n\nYour task: $taskText\n\nDeliver concrete output (code, files, or clear steps)."
+                    )
                 }
-            }.awaitAll()
+                onResult(AgentRole.CODER, coderOutput)
+                _unfinished.update { l -> l.filter { it.id != coderReq.id } }
+                persist()
+                setStatus(AgentRole.CODER, AgentStatus.DONE, "Selesai ✓")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                setStatus(AgentRole.CODER, AgentStatus.PAUSED, "⏸ Tertunda")
+                onFailure(AgentRole.CODER, e.message ?: e.javaClass.simpleName)
+            }
         }
+
+        if (auditorReq != null && coderOutput != null) {
+            try {
+                setStatus(AgentRole.AUDITOR, AgentStatus.WORKING, "Review...")
+                val auditTask = plan.tasks.find { it.role == AgentRole.AUDITOR }?.task ?: auditorReq.report
+                val auditOut = llmGate.withPermit {
+                    runner(
+                        AgentRole.AUDITOR,
+                        "You are the AUDITOR agent. Review the Coder output strictly.\nContext:\n$context\nReply in the same language as the user.",
+                        "Command: ${plan.userCommand}\n\nPlan:\n${plan.architectPlan}\n\nYour task: $auditTask\n\nCoder output:\n$coderOutput\n\n" +
+                            "If the work is good, say APPROVED and summarize. If it needs a fix, say NEEDS_FIX and list exact changes (max 5 bullets)."
+                    )
+                }
+                onResult(AgentRole.AUDITOR, auditOut)
+                _unfinished.update { l -> l.filter { it.id != auditorReq.id } }
+                persist()
+
+                val needsFix = auditOut.contains("NEEDS_FIX", ignoreCase = true) ||
+                    auditOut.contains("perlu perbaikan", ignoreCase = true)
+
+                if (needsFix && coderReq != null) {
+                    // Max 1 putaran perbaikan
+                    setStatus(AgentRole.CODER, AgentStatus.WORKING, "Perbaikan...")
+                    val fixOut = llmGate.withPermit {
+                        runner(
+                            AgentRole.CODER,
+                            "You are the CODER agent. Apply the Auditor's requested fixes only.\nContext:\n$context",
+                            "Original command: ${plan.userCommand}\n\nPrevious output:\n$coderOutput\n\nAuditor feedback:\n$auditOut\n\nDeliver the corrected output."
+                        )
+                    }
+                    onResult(AgentRole.CODER, fixOut)
+                    setStatus(AgentRole.CODER, AgentStatus.DONE, "Diperbaiki ✓")
+                }
+                setStatus(AgentRole.AUDITOR, AgentStatus.DONE, "Selesai ✓")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                setStatus(AgentRole.AUDITOR, AgentStatus.PAUSED, "⏸ Tertunda")
+                onFailure(AgentRole.AUDITOR, e.message ?: e.javaClass.simpleName)
+            }
+        } else if (auditorReq != null && coderOutput == null) {
+            // Tidak ada hasil Coder → Auditor tetap di unfinished
+            setStatus(AgentRole.AUDITOR, AgentStatus.PAUSED, "Menunggu Coder")
+        }
+
+        // --- Agen lain (paralel, opsional) ---
+        if (others.isNotEmpty()) {
+            others.forEach { setStatus(it.agentRole, AgentStatus.WORKING, "Mengerjakan...") }
+            coroutineScope {
+                others.map { a ->
+                    async {
+                        try {
+                            val taskText = plan.tasks.find { it.role == a.agentRole }?.task ?: a.report
+                            val out = llmGate.withPermit {
+                                runner(
+                                    a.agentRole,
+                                    "You are the ${a.agentRole.name} agent in PixelForge.\nContext:\n$context\nReply in the same language as the user.",
+                                    "Command: ${plan.userCommand}\n\nPlan:\n${plan.architectPlan}\n\nYour task: $taskText\n\nDeliver your output."
+                                )
+                            }
+                            onResult(a.agentRole, out)
+                            _unfinished.update { l -> l.filter { it.id != a.id } }
+                            persist()
+                            setStatus(a.agentRole, AgentStatus.DONE, "Selesai ✓")
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            setStatus(a.agentRole, AgentStatus.PAUSED, "⏸ Tertunda")
+                            onFailure(a.agentRole, e.message ?: e.javaClass.simpleName)
+                        }
+                    }
+                }.awaitAll()
+            }
+        }
+
         val done = _unfinished.value.isEmpty()
         _currentPlan.update { it?.copy(status = if (done) TaskStatus.COMPLETED else TaskStatus.IN_PROGRESS) }
         persist()
@@ -208,22 +312,56 @@ class AgentOrchestrator(
 
     private fun setStatus(role: AgentRole, status: AgentStatus, bubble: String?) {
         _agents.update { list ->
-            list.map { if (it.role == role) it.copy(status = status, bubbleText = bubble, lastActivity = System.currentTimeMillis()) else it }
+            list.map {
+                if (it.role == role) it.copy(status = status, bubbleText = bubble, lastActivity = System.currentTimeMillis())
+                else it
+            }
         }
     }
 
-    private fun determineRelevantRoles(command: String): List<AgentRole> {
-        val c = command.lowercase()
-        fun has(vararg k: String) = k.any { c.contains(it) }
-        val roles = mutableListOf<AgentRole>()
-        if (has("code", "kode", "fitur", "feature", "implement", "buat", "app", "aplikasi", "api", "login")) {
-            roles += listOf(AgentRole.CODER, AgentRole.AUDITOR)
+    // ---------- parsing single-call Architect ----------
+
+    private data class ParsedPlan(
+        val planText: String,
+        val tasks: List<AgentTask>,
+        val estimatedCalls: Int
+    )
+
+    private fun parseArchitectJson(raw: String, fallbackCommand: String): ParsedPlan {
+        val cleaned = raw.trim()
+            .removePrefix("```json").removePrefix("```").removeSuffix("```").trim()
+
+        return try {
+            // Parsing sederhana tanpa dependency JSON library tambahan (gunakan regex/heuristik)
+            val planMatch = Regex(""""plan"\s*:\s*"((?:[^"\\]|\\.)*)"""").find(cleaned)
+            val planText = planMatch?.groupValues?.get(1)?.replace("\\n", "\n")?.replace("\\\"", "\"")
+                ?: cleaned.take(400)
+
+            val taskBlocks = Regex(
+                """\{[^{}]*"role"\s*:\s*"([A-Z]+)"[^{}]*"task"\s*:\s*"((?:[^"\\]|\\.)*)"[^{}]*\}"""
+            ).findAll(cleaned)
+
+            val tasks = taskBlocks.mapNotNull { m ->
+                val roleStr = m.groupValues[1]
+                val task = m.groupValues[2].replace("\\n", "\n").replace("\\\"", "\"")
+                val role = runCatching { AgentRole.valueOf(roleStr) }.getOrNull() ?: return@mapNotNull null
+                AgentTask(role = role, task = task)
+            }.toList()
+
+            val estMatch = Regex(""""estimated_calls"\s*:\s*(\d+)""").find(cleaned)
+            val est = estMatch?.groupValues?.get(1)?.toIntOrNull() ?: (1 + tasks.size.coerceAtLeast(1))
+
+            ParsedPlan(
+                planText = planText.ifBlank { "Rencana untuk: $fallbackCommand" },
+                tasks = tasks.ifEmpty { listOf(AgentTask(AgentRole.GENERAL, planText.take(200))) },
+                estimatedCalls = est.coerceIn(1, 12)
+            )
+        } catch (e: Exception) {
+            ParsedPlan(
+                planText = cleaned.take(400).ifBlank { "Rencana untuk: $fallbackCommand" },
+                tasks = listOf(AgentTask(AgentRole.GENERAL, cleaned.take(200))),
+                estimatedCalls = 2
+            )
         }
-        if (has("bug", "error", "crash", "debug", "fix", "perbaiki")) roles += AgentRole.DEBUGGER
-        if (has("audit", "review", "security", "keamanan")) roles += AgentRole.AUDITOR
-        if (has("logo", "design", "desain", "content", "konten", "kreatif", "creative")) roles += AgentRole.CREATIVE
-        if (has("bisnis", "business", "plan", "rencana", "strategi", "pasar", "market")) roles += AgentRole.BUSINESS
-        if (roles.isEmpty()) roles += AgentRole.GENERAL
-        return roles.distinct()
     }
 }

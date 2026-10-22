@@ -474,7 +474,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val p = orchestrator.submitCommand(_projectId.value, text, fullContext()) { s, u -> router.chat(s, u) }
                 post("AGENT", "assistant", p.architectPlan, "ARCHITECT")
-                post("SYSTEM", "system", "Rencana siap. Buka tab Approvals untuk menyetujui atau menolak.")
+                val est = if (p.estimatedCalls > 0) " · Estimasi ~${p.estimatedCalls} panggilan" else ""
+                post("SYSTEM", "system", "Rencana siap$est. Buka tab Approvals untuk menyetujui atau menolak.")
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

@@ -46,17 +46,19 @@ Setelah sync pertama, bisa juga lewat terminal (sekali jalankan `gradle wrapper`
 The APK will be at:
 `app/build/outputs/apk/debug/app-debug.apk`
 
-## Fitur v0.2
+## Fitur v0.5 (hemat kuota)
 
-- **Multi-provider LLM**: OpenRouter + OmniRoute (atau endpoint OpenAI-compatible lain). Kena limit → otomatis pindah provider; kalau semuanya gagal, progres disimpan dan bisa **Lanjutkan** dari tab Approvals.
-- **Workspace**: agent menulis file (blok `=== FILE: path ===`) ke folder project di app; lihat di tab Files.
-- **GitHub sebagai wadah kode**: file di-commit ke repo, GitHub Actions membuild, Debugger membaca log error dan memperbaiki otomatis (maks 3x).
+- **Single-call Architect**: satu panggilan LLM menghasilkan rencana + tugas terstruktur (bukan N panggilan laporan).
+- **Pipeline Coder → Auditor**: Auditor mereview hasil Coder; maksimal 1 putaran perbaikan.
+- **Estimasi panggilan** ditampilkan sebelum Approve.
+- Multi-provider LLM (OpenRouter + OmniRoute), fallback otomatis, progres tersimpan saat limit.
+- Workspace + GitHub CI/debug loop.
 
 ## Status
 
-Sudah jalan: Approval Gate asli (Architect → laporan agent → Approve/Reject → eksekusi paralel), OpenRouter dengan fallback model, API key terenkripsi, chat & Project Bible tersimpan di Room, kantor pixel dengan gerak idle.
+Sudah jalan: Approval Gate, single-call plan, pipeline berurutan Coder→Auditor, OpenRouter fallback, Keystore, Room chat, kantor pixel.
 
-Belum: voice input, Revise di Approval Gate, WorkManager, kompresi konteks, animasi sprite pixel-art asli.
+Berikutnya: Skills system (Superpowers / grillme), Memory Bank, kurangi ketergantungan Project Bible, context condensation, voice.
 
 ## Project Structure
 
