@@ -152,9 +152,10 @@ class QuotaMeter(private val clock: () -> Long = { System.currentTimeMillis() })
     private fun roll(s: State, now: Long) {
         val key = now / DAY
         if (s.dayKey != key) {
+            // Penahanan hanya dibuang saat hari benar-benar berganti, bukan saat state baru dibuat.
+            if (s.dayKey != -1L) s.blockedUntil = 0L
             s.dayKey = key
             s.usedDay = 0
-            s.blockedUntil = 0L
         }
         while (s.minuteHits.isNotEmpty() && s.minuteHits.first() <= now - MINUTE) s.minuteHits.removeFirst()
     }

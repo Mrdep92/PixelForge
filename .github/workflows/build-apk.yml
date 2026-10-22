@@ -35,7 +35,7 @@ jobs:
         if: failure()
         shell: bash
         run: |
-          msg=$(cat test.log build.log 2>/dev/null | grep -E '^e: |error:|What went wrong|FAILED|Execution failed|AssertionError|expected' -A3 | head -60 | sed ':a;N;$!ba;s/\n/%0A/g')
+          msg=$(cat test.log build.log 2>/dev/null | grep -E '^e: |error:|What went wrong|FAILED|Execution failed|AssertionError|expected' -A3 | head -60 | sed ':a;N;$!ba;s/\n/%0A/g' || true)
           echo "::error title=Build errors::$msg"
 
       - uses: actions/upload-artifact@v4
