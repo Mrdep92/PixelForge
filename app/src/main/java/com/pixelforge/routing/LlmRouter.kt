@@ -86,6 +86,7 @@ class LlmRouter(private val providers: List<Provider>, private val meter: QuotaM
             var skipProvider = false
             for (model in p.models) {
                 if (skipProvider) break
+                if ("${p.name}/$model" in unusable) continue
                 if (p.freeOnly && !FreeModels.isFree(model)) {
                     errors += "${p.name}/$model: dilewati (bukan model gratis)"
                     continue
@@ -127,6 +128,10 @@ class LlmRouter(private val providers: List<Provider>, private val meter: QuotaM
                                 break
                             }
                         } else if (e.code in 400..499 && e.code != 408) {
+                            // 403 "hanya untuk agentic harness": model ini tidak akan pernah jalan dari aplikasi → lewati selamanya.
+                            if (e.code == 403 && e.message?.contains("agentic", ignoreCase = true) == true) {
+                                unusable += "${p.name}/$model"
+                            }
                             break // key salah / saldo habis / model tidak ada → langsung ke berikutnya
                         } else {
                             delay(2000L * attempt)
@@ -178,6 +183,8 @@ class LlmRouter(private val providers: List<Provider>, private val meter: QuotaM
     fun close() = client.close()
 
     private companion object {
+        /** Model yang ditolak permanen oleh penyedia selama proses aplikasi berjalan. */
+        val unusable: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
         const val MAX_WAIT_MS = 20_000L
     }
 }
