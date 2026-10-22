@@ -29,6 +29,8 @@ import com.pixelforge.routing.Privacy
 import com.pixelforge.routing.FreeModels
 import com.pixelforge.routing.LlmExhaustedException
 import com.pixelforge.routing.LlmRouter
+import com.pixelforge.routing.ProviderConfig
+import com.pixelforge.routing.ProviderPresets
 import com.pixelforge.routing.QuotaMeter
 import com.pixelforge.routing.Provider
 import com.pixelforge.workspace.Workspace
@@ -446,6 +448,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 limitPerAccount = true
             )
         }
+        for (c in ProviderPresets.parse(store.extraProvidersJson)) {
+            if (!c.enabled || c.baseUrl.isBlank() || c.model.isBlank()) continue
+            list += Provider(name = c.name, baseUrl = c.baseUrl, apiKey = c.apiKey, models = listOf(c.model), limitPerAccount = true)
+        }
         if (store.omniUrl.isNotBlank()) {
             list += Provider(
                 name = "OmniRoute",
@@ -456,6 +462,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         return if (store.omniFirst) list.reversed() else list
+    }
+
+    // ---------- Kolam provider ----------
+
+    private val _pool = MutableStateFlow(ProviderPresets.parse(store.extraProvidersJson))
+    val pool = _pool.asStateFlow()
+
+    private fun savePool(list: List<ProviderConfig>) {
+        store.extraProvidersJson = ProviderPresets.toJson(list)
+        _pool.value = list
+    }
+
+    fun addProvider(c: ProviderConfig) {
+        if (c.name.isBlank() || c.baseUrl.isBlank()) return
+        savePool(ProviderPresets.upsert(_pool.value, c.copy(name = c.name.trim(), baseUrl = c.baseUrl.trim(), model = c.model.trim())))
+    }
+
+    fun removeProvider(name: String) = savePool(_pool.value.filterNot { it.name == name })
+
+    fun setProviderEnabled(name: String, enabled: Boolean) =
+        savePool(_pool.value.map { if (it.name == name) it.copy(enabled = enabled) else it })
+
+    fun fetchModels(baseUrl: String, apiKey: String, onResult: (List<String>) -> Unit) {
+        viewModelScope.launch { onResult(ProviderPresets.listModels(baseUrl, apiKey)) }
     }
 
     // ---------- Perintah → rencana ----------

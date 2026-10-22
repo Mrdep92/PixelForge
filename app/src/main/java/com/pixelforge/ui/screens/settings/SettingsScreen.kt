@@ -1,6 +1,7 @@
 package com.pixelforge.ui.screens.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +16,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.pixelforge.routing.ProviderConfig
+import com.pixelforge.routing.ProviderPresets
 import com.pixelforge.ui.MainViewModel
 import com.pixelforge.ui.SettingsForm
 
@@ -57,6 +60,78 @@ private fun Field(
         visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
         colors = fieldColors()
     )
+}
+
+@Composable
+private fun PoolSection(vm: MainViewModel) {
+    val pool by vm.pool.collectAsStateWithLifecycle()
+    SectionTitle("Penyedia tambahan (kolam)")
+    Text(
+        "Tiap akun penyedia punya jatah gratis sendiri, jadi menambah penyedia menambah jatah harian. " +
+            "Pakai key milikmu sendiri. Alamat bawaan belum semuanya diuji; kalau gagal, periksa alamatnya di dokumen penyedia.",
+        color = Color.Gray, fontSize = 12.sp
+    )
+    pool.forEach { c ->
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 8.dp)) {
+            Column(Modifier.weight(1f)) {
+                Text(c.name, color = Color.White, fontSize = 14.sp)
+                Text(if (c.model.isBlank()) "model belum dipilih" else c.model, color = Color.Gray, fontSize = 12.sp)
+            }
+            Switch(checked = c.enabled, onCheckedChange = { vm.setProviderEnabled(c.name, it) })
+            TextButton(onClick = { vm.removeProvider(c.name) }) { Text("Hapus", color = Color(0xFFFF5252)) }
+        }
+    }
+
+    var name by remember { mutableStateOf("") }
+    var baseUrl by remember { mutableStateOf("") }
+    var key by remember { mutableStateOf("") }
+    var model by remember { mutableStateOf("") }
+    var models by remember { mutableStateOf<List<String>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var info by remember { mutableStateOf("") }
+
+    Spacer(Modifier.height(12.dp))
+    Text("Tambah penyedia", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    Row(Modifier.horizontalScroll(rememberScrollState())) {
+        ProviderPresets.all.forEach { p ->
+            TextButton(onClick = { name = if (p.baseUrl.isBlank()) "" else p.name; baseUrl = p.baseUrl }) {
+                Text(p.name, color = Color(0xFF00E5FF))
+            }
+        }
+    }
+    Field("Nama", name, { name = it }, "mis. Groq")
+    Field("Base URL", baseUrl, { baseUrl = it }, "https://.../v1")
+    Field("API Key", key, { key = it }, secret = true)
+    TextButton(
+        enabled = baseUrl.isNotBlank() && key.isNotBlank() && !loading,
+        onClick = {
+            loading = true; info = ""
+            vm.fetchModels(baseUrl, key) { r ->
+                models = r; loading = false
+                if (r.isEmpty()) info = "Daftar model tidak bisa diambil. Ketik nama model secara manual."
+            }
+        }
+    ) { Text(if (loading) "Mengambil..." else "Ambil daftar model", color = Color(0xFF00E5FF)) }
+    if (info.isNotBlank()) Text(info, color = Color(0xFFFFAB40), fontSize = 12.sp)
+    if (models.isNotEmpty()) {
+        Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+            models.forEach { m ->
+                TextButton(onClick = { model = m }) {
+                    Text(m, color = if (m == model) Color(0xFF00E676) else Color.White, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+    Field("Model", model, { model = it }, "pilih dari daftar atau ketik")
+    Spacer(Modifier.height(8.dp))
+    Button(
+        enabled = name.isNotBlank() && baseUrl.isNotBlank() && key.isNotBlank() && model.isNotBlank(),
+        onClick = {
+            vm.addProvider(ProviderConfig(name, baseUrl, key, model))
+            name = ""; baseUrl = ""; key = ""; model = ""; models = emptyList(); info = ""
+        },
+        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF))
+    ) { Text("Tambahkan ke kolam") }
 }
 
 @Composable
@@ -125,6 +200,8 @@ fun SettingsScreen(vm: MainViewModel) {
             "Hitungan dibuat aplikasi dan dikoreksi dari header server bila ada. Angka batas gratis bisa berubah di sisi penyedia.",
             color = Color.Gray, fontSize = 12.sp
         )
+
+        PoolSection(vm)
 
         SectionTitle("OmniRoute / endpoint kompatibel OpenAI")
         Text(

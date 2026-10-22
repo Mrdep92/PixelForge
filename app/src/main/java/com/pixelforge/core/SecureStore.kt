@@ -33,6 +33,11 @@ class SecureStore(context: Context) {
         get() = prefs.getBoolean("or_credits", false)
         set(v) = prefs.edit().putBoolean("or_credits", v).apply()
 
+    /** Penyedia tambahan di kolam (JSON). Key ikut tersimpan terenkripsi. */
+    var extraProvidersJson: String
+        get() = prefs.getString("extra_providers", "[]") ?: "[]"
+        set(v) = prefs.edit().putString("extra_providers", v).apply()
+
     // OmniRoute / endpoint kompatibel OpenAI lainnya
     var omniUrl: String
         get() = prefs.getString("omni_url", "") ?: ""
