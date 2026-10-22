@@ -7,7 +7,8 @@ object Privacy {
 
     /**
      * Project publik, atau privat dengan izin → semua provider.
-     * Project privat tanpa izin → hanya provider tepercaya, dan provider berbayar dengan model non-:free.
+     * Project privat tanpa izin → hanya provider tepercaya, atau provider yang menandai harga modelnya
+     * (OpenRouter) dengan model non-:free. Provider lain yang tidak bisa dinilai dianggap tidak aman.
      * Daftar kosong berarti tidak ada jalur yang aman.
      */
     fun apply(providers: List<Provider>, isPrivate: Boolean, freeConsent: Boolean): Result {
@@ -15,7 +16,7 @@ object Privacy {
         val allowed = providers.mapNotNull { p ->
             when {
                 p.trusted -> p
-                !p.freeOnly -> {
+                p.modelsDeclarePricing && !p.freeOnly -> {
                     val paid = p.models.filterNot { FreeModels.isFree(it) }
                     if (paid.isEmpty()) null else p.copy(models = paid)
                 }

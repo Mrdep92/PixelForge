@@ -23,7 +23,9 @@ data class Provider(
     /** Kalau true, model tanpa akhiran :free dilewati (mencegah tagihan tak sengaja). */
     val freeOnly: Boolean = false,
     /** Provider milik sendiri / dipercaya pemilik: boleh menerima kode project privat. */
-    val trusted: Boolean = false
+    val trusted: Boolean = false,
+    /** Nama model menunjukkan gratis/berbayar (OpenRouter pakai akhiran :free). Provider lain tidak bisa dinilai. */
+    val modelsDeclarePricing: Boolean = false
 )
 
 /** Semua provider gagal (limit / jaringan / key salah). Progres kerja harus disimpan lalu dilanjutkan nanti. */

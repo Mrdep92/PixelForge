@@ -427,7 +427,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 apiKey = store.apiKey,
                 models = FreeModels.candidates(store.model, freeCatalog(), store.allowPaid),
                 headers = mapOf("HTTP-Referer" to "https://pixelforge.app", "X-Title" to "PixelForge"),
-                freeOnly = !store.allowPaid
+                freeOnly = !store.allowPaid,
+                modelsDeclarePricing = true
             )
         }
         if (store.omniUrl.isNotBlank()) {

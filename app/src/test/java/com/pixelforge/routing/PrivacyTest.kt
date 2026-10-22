@@ -5,8 +5,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PrivacyTest {
-    private val free = Provider("OpenRouter", "u", "k", listOf("a:free", "b:free"), freeOnly = true)
-    private val paid = Provider("OpenRouter", "u", "k", listOf("a:free", "gpt-x"), freeOnly = false)
+    private val free = Provider("OpenRouter", "u", "k", listOf("a:free", "b:free"), freeOnly = true, modelsDeclarePricing = true)
+    private val paid = Provider("OpenRouter", "u", "k", listOf("a:free", "gpt-x"), freeOnly = false, modelsDeclarePricing = true)
     private val omni = Provider("OmniRoute", "u", "", listOf("auto"), trusted = true)
     private val omniUntrusted = Provider("OmniRoute", "u", "", listOf("auto"))
 
