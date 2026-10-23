@@ -3,6 +3,8 @@ package com.pixelforge.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -91,6 +93,7 @@ fun ProjectBar(vm: MainViewModel) {
         branch = meta.branch,
         onDismiss = { showEdit = false },
         onSave = { r, b -> showEdit = false; vm.updateRepo(r, b) },
+        onFetchRepos = { cb -> vm.fetchRepos(cb) },
         onCreateRepo = { name, priv -> showEdit = false; vm.createRepo(name, priv) }
     )
 }
@@ -149,8 +152,12 @@ private fun EditRepoDialog(
     branch: String,
     onDismiss: () -> Unit,
     onSave: (String, String) -> Unit,
+    onFetchRepos: ((List<com.pixelforge.github.RepoInfo>, String?) -> Unit) -> Unit,
     onCreateRepo: (String, Boolean) -> Unit
 ) {
+    var repos by remember { mutableStateOf<List<com.pixelforge.github.RepoInfo>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
     var r by remember { mutableStateOf(repo) }
     var b by remember { mutableStateOf(branch) }
     var newName by remember { mutableStateOf("") }
@@ -161,6 +168,20 @@ private fun EditRepoDialog(
         title = { Text("Repo project ini") },
         text = {
             Column {
+                TextButton(enabled = !loading, onClick = {
+                    loading = true; err = null
+                    onFetchRepos { list, e -> repos = list; err = e; loading = false }
+                }) { Text(if (loading) "Mengambil..." else "📂 Pilih dari repo GitHub-mu") }
+                err?.let { Text(it, color = Color(0xFFFFAB40), fontSize = 12.sp) }
+                if (repos.isNotEmpty()) {
+                    Column(Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
+                        repos.forEach { ri ->
+                            TextButton(onClick = { r = ri.fullName; b = ri.defaultBranch; repos = emptyList() }) {
+                                Text((if (ri.isPrivate) "🔒 " else "") + ri.fullName, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = r, onValueChange = { r = it },
                     label = { Text("Repo (username/nama-repo)") }, singleLine = true

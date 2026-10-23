@@ -93,6 +93,21 @@ class GitHubClient(private val token: String, repo: String, private val branch: 
         )
     }
 
+    /** Repo milik/akses token, terbaru dipakai dulu (maks 100). */
+    suspend fun listRepos(): List<RepoInfo> {
+        val r = callUrl(HttpMethod.Get, "https://api.github.com/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member")
+        if (r.code == 401) throw GitHubException("Token GitHub salah atau kedaluwarsa.")
+        if (r.code !in 200..299) throw GitHubException("Daftar repo → HTTP ${r.code}: ${msgOf(r.body)}")
+        return JsonParser.parseString(r.body).asJsonArray.mapNotNull { el ->
+            val o = el.asJsonObject
+            if (o.get("archived")?.asBoolean == true) return@mapNotNull null
+            RepoInfo(
+                o.get("full_name").asString, o.get("default_branch")?.asString ?: "main",
+                o.get("html_url").asString, o.get("private")?.asBoolean ?: false
+            )
+        }
+    }
+
     /** Agent Repo: buat repo baru (dengan README awal supaya langsung siap di-commit). */
     suspend fun createRepo(name: String, description: String, isPrivate: Boolean): RepoInfo {
         val body = JsonObject().apply {

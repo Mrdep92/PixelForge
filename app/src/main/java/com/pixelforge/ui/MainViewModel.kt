@@ -245,6 +245,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Ambil daftar repo di akun GitHub untuk dipilih. Hasil: (daftar, pesan error atau null). */
+    fun fetchRepos(onResult: (List<RepoInfo>, String?) -> Unit) {
+        val token = store.ghToken
+        if (token.isBlank()) { onResult(emptyList(), "Isi token GitHub di Settings dulu."); return }
+        viewModelScope.launch {
+            val gh = GitHubClient(token, "", "main")
+            try {
+                onResult(gh.listRepos(), null)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                onResult(emptyList(), e.message ?: "Gagal mengambil daftar repo.")
+            } finally {
+                gh.close()
+            }
+        }
+    }
+
     /** Terapkan repo baru ke project aktif; izin privasi direset kalau repo-nya berbeda. */
     private fun setRepo(info: RepoInfo) {
         val old = _meta.value
