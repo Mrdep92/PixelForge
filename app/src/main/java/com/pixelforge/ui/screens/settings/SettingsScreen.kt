@@ -260,13 +260,6 @@ fun SettingsScreen(vm: MainViewModel) {
             color = Color.Gray, fontSize = 12.sp
         )
 
-        SectionTitle("Project Bible (project aktif)")
-        Text("Selalu dikirim ke semua agent", color = Color.Gray, fontSize = 12.sp)
-        Field(
-            "Isi Bible", bible, { bible = it; saved = false },
-            singleLine = false, modifier = Modifier.heightIn(min = 160.dp)
-        )
-
         Spacer(Modifier.height(20.dp))
         Button(
             onClick = {

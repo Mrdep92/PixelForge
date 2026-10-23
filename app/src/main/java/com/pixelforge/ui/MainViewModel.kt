@@ -171,7 +171,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 stateStore.save("meta:$PROJECT_ID", ProjectMeta(store.ghRepo, store.ghBranch))
                 if (_projectId.value == PROJECT_ID) _meta.value = loadMeta(PROJECT_ID)
             }
-            _bible.value = db.bibleDao().get(_projectId.value)?.content ?: DEFAULT_BIBLE
+            _bible.value = db.bibleDao().get(_projectId.value)?.content?.takeUnless { isOldTemplate(it) } ?: DEFAULT_BIBLE
             _settings.value = readSettings()
         }
     }
@@ -203,7 +203,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ci.value = loadCi(id)
         _files.value = wsFor(id).list()
         viewModelScope.launch {
-            _bible.value = db.bibleDao().get(id)?.content ?: DEFAULT_BIBLE
+            _bible.value = db.bibleDao().get(id)?.content?.takeUnless { isOldTemplate(it) } ?: DEFAULT_BIBLE
             _settings.value = readSettings()
         }
     }
@@ -215,8 +215,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val id = UUID.randomUUID().toString()
             val now = System.currentTimeMillis()
             db.projectDao().insert(ProjectEntity(id, n, "", now, now, true))
-            val bible = DEFAULT_BIBLE.replace("(Tulis tujuan proyekmu di sini)", "Project \"$n\" — (tulis tujuan di sini)")
-            db.bibleDao().upsert(ProjectBibleEntity(id, bible, now))
+            db.bibleDao().upsert(ProjectBibleEntity(id, DEFAULT_BIBLE, now))
             stateStore.save("meta:$id", ProjectMeta(if (autoRepo) "" else repoName.trim(), "main"))
             switchProject(id)
             post("SYSTEM", "system", "📁 Project \"$n\" dibuat. Beri perintah di tab Chat.")
@@ -428,12 +427,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         store.omniTrusted = f.omniTrusted
         store.orCredits = f.orCredits
         if (f.ghToken.isNotBlank()) store.ghToken = f.ghToken
-        _bible.value = f.bible
         _settings.value = readSettings()
-        val pid = _projectId.value
-        viewModelScope.launch {
-            db.bibleDao().upsert(ProjectBibleEntity(pid, f.bible, System.currentTimeMillis()))
-        }
     }
 
     /** Daftar model gratis OpenRouter; diperbarui paling sering sekali per 12 jam, sisanya dari simpanan. */
@@ -514,7 +508,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val text = command.trim()
         if (text.isEmpty() || _busy.value) return
         viewModelScope.launch {
-            if (echo) post("USER", "user", text)
+            if (echo) {
+                post("USER", "user", text)
+                val pid = _projectId.value
+                val updated = addToBrief(_bible.value, text)
+                _bible.value = updated
+                db.bibleDao().upsert(ProjectBibleEntity(pid, updated, System.currentTimeMillis()))
+            }
             val providers = allowedProviders { doSend(text, false) }
             if (providers.isEmpty()) return@launch
             _busy.value = true
@@ -701,7 +701,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val run = runToolAgent(
                         router,
                         AgentRole.DEBUGGER,
-                        DEBUG_SYSTEM + "Project Bible:\n" + fullContext(),
+                        DEBUG_SYSTEM + "Ringkasan project:\n" + fullContext(),
                         "CI build log (condensed):\n$log\n\nFind the root cause and fix it. Use LIST/READ/GREP to inspect the files first."
                     )
                     if (run.changed.isEmpty()) {
@@ -779,15 +779,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private const val DEBUG_SYSTEM =
             "You are the Debugger agent. A CI build failed. Find the root cause from the log and fix it " +
                 "with minimal edits. Reply in Indonesian.\n"
-        val DEFAULT_BIBLE = """
-            # Project Bible
-            ## Tujuan
-            (Tulis tujuan proyekmu di sini)
-            ## Tech stack
-            (mis. Kotlin, Jetpack Compose, Room)
-            ## Aturan
-            - Jawab singkat dan konkret
-            - Ikuti gaya kode yang sudah ada
-        """.trimIndent()
+        val DEFAULT_BIBLE = BRIEF_HEADER
+        private const val BRIEF_HEADER = "# Ringkasan project (otomatis dari chat)"
+        private const val BRIEF_KEEP_LAST = 5
+        private const val BRIEF_ITEM_MAX = 300
+
+        /** Template Bible lama yang tidak pernah diisi dianggap kosong. */
+        fun isOldTemplate(text: String) = text.contains("(Tulis tujuan proyekmu di sini)") || text.contains("(tulis tujuan di sini)")
+
+        /** Ringkasan dari permintaan pengguna: permintaan pertama + 5 terakhir, tanpa panggilan LLM. */
+        fun addToBrief(brief: String, request: String): String {
+            val items = brief.lines().filter { it.startsWith("- ") }.toMutableList()
+            val one = request.trim().replace(Regex("\s+"), " ").take(BRIEF_ITEM_MAX)
+            if (one.isEmpty()) return brief
+            items += "- $one"
+            val kept = if (items.size > BRIEF_KEEP_LAST + 1) listOf(items.first()) + items.takeLast(BRIEF_KEEP_LAST) else items
+            return BRIEF_HEADER + "
+" + kept.joinToString("
+")
+        }
     }
 }
