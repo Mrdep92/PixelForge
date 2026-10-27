@@ -73,6 +73,74 @@ app/src/main/java/com/pixelforge/
 └── ui/              # Compose screens & components
 ```
 
+## Analisis Perilaku Agent & Saran Perbaikan (27 Okt 2026)
+
+Dibuat setelah membaca kode dan mencocokkannya dengan tangkapan layar Debugger yang menulis
+"Root cause diperbaiki" padahal aplikasi sendiri menampilkan "⚠ Debugger tidak mengubah file apa pun".
+Pembagian: **[Terverifikasi]** = dicek langsung di kode/repo/API GitHub; **[Asumsi]** = belum dibuktikan.
+
+### A. Mengapa error itu muncul
+
+1. **[Terverifikasi] `AgentLoop.run` menerima `DONE` walau `EDIT` di balasan yang sama gagal.**
+   Semua blok dalam satu balasan dieksekusi berurutan; hasil tool dikumpulkan di `results`, tetapi bila ada
+   blok `DONE` loop langsung `return` dan `results` (termasuk `ERROR: ... dilindungi`) dibuang tanpa pernah
+   dilihat model. Di layar: putaran 2 = `✏️ build.yml, ✅ selesai`. Teks "Root cause diperbaiki" adalah
+   *klaim model sendiri* (`Result.summary`), bukan hasil yang diverifikasi aplikasi. Tes yang ada
+   (`failedEditIsReportedBackToModel`, `existingWorkflowCannotBeEdited`) menaruh EDIT dan DONE di balasan
+   **terpisah**, sehingga kasus ini tidak tercakup.
+2. **[Terverifikasi] Perbaikan yang paling wajar justru diblokir.** `ProtectedFiles.violation` menolak edit
+   workflow yang sudah ada, sedangkan `DEBUG_SYSTEM` (MainViewModel) tidak memberi tahu Debugger batasan itu
+   dan tidak ada jalur resmi untuk perbaikan jenis "izin eksekusi / langkah workflow".
+3. **[Terverifikasi] `runCi` berhenti total bila `changed` kosong** (`setCi(CiState()); return`): tidak ada
+   percobaan ulang, tidak ada eskalasi ke pengguna, hanya satu pesan peringatan.
+4. **[Terverifikasi] `GitHubClient.commitFiles` menulis semua file dengan mode `100644`.** `gradlew` yang
+   masuk lewat aplikasi tidak pernah executable. Di repo `Mrdep92/about-muslim`, `gradlew` memang bermode
+   `100644` (dicek via API). Ini penyebab nyata `Permission denied` (exit 126) pada workflow yang memanggil `./gradlew`.
+5. **[Terverifikasi] Janji "aplikasi menyediakan gradlew/wrapper" belum ada implementasinya.** Satu-satunya
+   kemunculan di kode hanyalah teks prompt (`ToolProtocol.PROMPT`) dan `ProtectedFiles`. `Workspace` menyimpan
+   `Map<String, String>` (teks), jadi `gradle-wrapper.jar` (biner) tidak bisa dibawa. Agent dilarang membuat
+   wrapper, padahal tidak ada pihak lain yang membuatnya.
+
+### B. Yang belum terbukti
+
+- **[Asumsi]** Isi log error CI yang sebenarnya. Log disimpan di blob storage Azure yang tidak bisa diakses
+  dari lingkungan analisis ini, jadi hanya status per langkah yang terbaca.
+- **[Terverifikasi parsial]** Repo `about-muslim` punya dua workflow (`build.yml` dan `main.yml`) yang jalan
+  bersamaan. `main.yml` sudah punya langkah `chmod +x ./gradlew` tetapi tetap gagal di `gradle assembleDebug`.
+  Artinya ada penyebab kedua yang belum diketahui, dan diagnosis "root cause = izin gradlew" dari Debugger
+  baru terbukti **sebagian** (untuk `build.yml` saja).
+- **[Asumsi]** Seberapa sering model gratis mengirim `DONE` bersama edit yang gagal. Perlu diukur lewat log.
+
+### C. Saran perbaikan (urut prioritas)
+
+**P0 — kecil, deterministik, bisa diuji unit**
+1. `AgentLoop`: bila di putaran yang sama ada hasil `ERROR`, **tolak `DONE`**, kirim semua hasil kembali ke
+   model beserta catatan "DONE ditolak karena ada error". Tes baru: EDIT-gagal + DONE dalam satu balasan.
+2. Jangan percaya ringkasan model. Tambahkan status hasil `FIXED / NO_CHANGE / BLOCKED`. Untuk Debugger,
+   `NO_CHANGE` ditampilkan dengan **alasan sebenarnya dari aplikasi** (mis. "workflow dilindungi"), bukan teks klaim model.
+3. `GitHubClient`: fungsi murni `modeFor(path)` → `100755` untuk `gradlew` dan `*.sh`, selain itu `100644`.
+   Tes unit untuk fungsi ini. Ini memperbaiki akar masalah izin tanpa menyentuh workflow.
+
+**P1 — butuh keputusan desain**
+4. Sediakan kerangka proyek Android yang **sudah terbukti**. Opsi paling murah: workflow template memakai
+   `gradle/actions/setup-gradle` dan perintah `gradle assembleDebug` (tanpa wrapper), seperti workflow
+   PixelForge sendiri yang buildnya sukses. Opsi lain: bundel wrapper (termasuk jar) sebagai aset dan kirim
+   dengan mode benar.
+5. Ganti larangan total edit workflow dengan **usulan perubahan yang butuh persetujuan** di tab Approvals
+   (tampilkan diff), atau allowlist langkah aman (`chmod`, versi JDK). Ini melonggarkan kebijakan keamanan, jadi
+   pengguna harus memutuskan.
+6. Debugger: sebelum memutuskan, beri ringkasan struktur (daftar file + mode) dan error pertama dari log;
+   bila `BLOCKED`, berhenti dengan pesan yang jelas dan tombol tindakan, bukan diam.
+
+**P2 — kebersihan**
+7. Tambahkan pengecekan duplikasi workflow di repo target (dua workflow pada push yang sama).
+8. Sinkronkan README/`docs/DESIGN.md` dengan kode sekarang (kantor 2D dan Project Bible sudah dihapus).
+
+### D. Cara membuktikan perbaikan selesai
+- P0-1 dan P0-3: tes unit hijau di CI (`gradle testDebugUnitTest`).
+- P0-2: skenario layar yang sama harus menampilkan status `BLOCKED` dengan alasan, bukan "diperbaiki".
+- P1-4: satu proyek uji baru harus mencapai build hijau di GitHub Actions tanpa campur tangan manual.
+
 ## License
 
 Personal use first. Future premium release planned.
