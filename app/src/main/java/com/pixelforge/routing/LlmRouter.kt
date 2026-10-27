@@ -29,7 +29,9 @@ data class Provider(
     /** Batas jatah yang diketahui (untuk meteran). Null = tidak diketahui. */
     val limits: QuotaMeter.Limits? = null,
     /** Jatah berlaku per akun, bukan per model: kena 429 berarti pindah model di provider ini tidak menolong. */
-    val limitPerAccount: Boolean = false
+    val limitPerAccount: Boolean = false,
+    /** Batas token per menit (mis. Groq); null = tidak dibatasi / tidak diketahui. */
+    val tpm: Int? = null
 )
 
 /** Semua provider gagal (limit / jaringan / key salah). Progres kerja harus disimpan lalu dilanjutkan nanti. */
@@ -47,6 +49,8 @@ private class HttpFail(val code: Int, message: String, val retryAfterMs: Long?) 
  * ke model/provider berikutnya. Kalau semuanya gagal → LlmExhaustedException.
  */
 class LlmRouter(private val providers: List<Provider>, private val meter: QuotaMeter? = null) {
+
+    private val tpm = TpmTracker(providers.mapNotNull { p -> p.tpm?.let { p.name to it } }.toMap())
 
     init {
         meter?.let { m -> providers.forEach { p -> p.limits?.let { m.setLimits(p.name, it) } } }
@@ -112,7 +116,19 @@ class LlmRouter(private val providers: List<Provider>, private val meter: QuotaM
                         else -> {}
                     }
                     if (skipProvider) break
+                    val est = TpmTracker.estimate(messages.sumOf { it.content?.length ?: 0 })
+                    val tpmWait = tpm.waitNeededMs(p.name, est)
+                    if (tpmWait >= TpmTracker.WINDOW) {
+                        errors += "${p.name}: permintaan terlalu besar untuk batas token per menit"
+                        break
+                    }
+                    if (tpmWait > 0) {
+                        if (tpmWait <= MAX_WAIT_MS * 3) delay(tpmWait + 200L)
+                        else { errors += "${p.name}: menunggu token per menit ±${tpmWait / 1000} detik"; rateLimited = true; skipProvider = true }
+                    }
+                    if (skipProvider) break
                     try {
+                        tpm.record(p.name, est)
                         return call(p, model, messages)
                     } catch (e: CancellationException) {
                         throw e
@@ -120,8 +136,15 @@ class LlmRouter(private val providers: List<Provider>, private val meter: QuotaM
                         errors += "${p.name}/$model: ${e.message}"
                         if (e.code == 429) {
                             rateLimited = true
-                            meter?.noteRateLimited(p.name, e.retryAfterMs)
-                            val wait = e.retryAfterMs ?: 4000L
+                            val msg = e.message.orEmpty()
+                            // 429 karena token per menit: cukup tunggu sebentar, jangan tahan provider seharian.
+                            val retry = e.retryAfterMs ?: TpmTracker.parseRetryMs(msg)
+                            if (TpmTracker.isTpmError(msg)) {
+                                if (attempt == 1 && (retry ?: 5000L) <= MAX_WAIT_MS * 3) { delay((retry ?: 5000L) + 200L); continue }
+                                break
+                            }
+                            meter?.noteRateLimited(p.name, retry)
+                            val wait = retry ?: 4000L
                             if (attempt == 1 && wait <= MAX_WAIT_MS) delay(wait)
                             else {
                                 if (p.limitPerAccount) skipProvider = true

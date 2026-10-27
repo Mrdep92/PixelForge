@@ -13,7 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class QuotaMeter(private val clock: () -> Long = { System.currentTimeMillis() }) {
 
-    data class Limits(val perMinute: Int?, val perDay: Int?)
+    /** [zone]: zona waktu tempat jatah harian direset (Gemini = America/Los_Angeles, kebanyakan lain = UTC). */
+    data class Limits(val perMinute: Int?, val perDay: Int?, val zone: String = "UTC")
 
     data class Snapshot(
         val provider: String,
@@ -45,6 +46,7 @@ class QuotaMeter(private val clock: () -> Long = { System.currentTimeMillis() })
         var usedDay = 0
         var reportedRemaining: Int? = null
         var blockedUntil: Long = 0L
+        var zone: java.time.ZoneId = java.time.ZoneOffset.UTC
     }
 
     private val states = LinkedHashMap<String, State>()
@@ -56,7 +58,9 @@ class QuotaMeter(private val clock: () -> Long = { System.currentTimeMillis() })
 
     @Synchronized
     fun setLimits(provider: String, limits: Limits) {
-        stateOf(provider).limits = limits
+        val s = stateOf(provider)
+        s.limits = limits
+        s.zone = runCatching { java.time.ZoneId.of(limits.zone) }.getOrDefault(java.time.ZoneOffset.UTC)
         publish(notify = false)
     }
 
@@ -80,7 +84,7 @@ class QuotaMeter(private val clock: () -> Long = { System.currentTimeMillis() })
         val now = clock()
         roll(s, now)
         val perDay = s.limits.perDay
-        if (perDay != null && s.usedDay >= perDay) return Verdict.DayExhausted(nextDayStart(now))
+        if (perDay != null && s.usedDay >= perDay) return Verdict.DayExhausted(nextDayStart(now, s.zone))
         if (s.blockedUntil > now) return Verdict.Wait(s.blockedUntil - now)
         val perMinute = s.limits.perMinute
         if (perMinute != null && s.minuteHits.size >= perMinute) {
@@ -150,7 +154,7 @@ class QuotaMeter(private val clock: () -> Long = { System.currentTimeMillis() })
     private fun stateOf(provider: String) = states.getOrPut(provider) { State() }
 
     private fun roll(s: State, now: Long) {
-        val key = now / DAY
+        val key = dayKeyOf(now, s.zone)
         if (s.dayKey != key) {
             // Penahanan hanya dibuang saat hari benar-benar berganti, bukan saat state baru dibuat.
             if (s.dayKey != -1L) s.blockedUntil = 0L
@@ -160,7 +164,12 @@ class QuotaMeter(private val clock: () -> Long = { System.currentTimeMillis() })
         while (s.minuteHits.isNotEmpty() && s.minuteHits.first() <= now - MINUTE) s.minuteHits.removeFirst()
     }
 
-    private fun nextDayStart(now: Long): Long = (now / DAY + 1) * DAY
+    private fun nextDayStart(now: Long, zone: java.time.ZoneId = java.time.ZoneOffset.UTC): Long =
+        java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate().plusDays(1)
+            .atStartOfDay(zone).toInstant().toEpochMilli()
+
+    private fun dayKeyOf(now: Long, zone: java.time.ZoneId): Long =
+        java.time.Instant.ofEpochMilli(now).atZone(zone).toLocalDate().toEpochDay()
 
     private fun publish(notify: Boolean = true) {
         val now = clock()

@@ -35,6 +35,19 @@ object ProviderPresets {
         Preset("Lainnya", "")
     )
 
+    /** Batas yang diketahui untuk penyedia tertentu. Angka dari akun pengguna; server tetap yang menentukan. */
+    data class Known(val limits: QuotaMeter.Limits?, val tpm: Int?)
+
+    fun known(name: String, model: String): Known = when {
+        // Gemini: jatah harian direset tengah malam Pasifik. 20/hari terkonfirmasi untuk gemini-3.6-flash (pesan 429 server).
+        name.contains("gemini", ignoreCase = true) -> Known(
+            QuotaMeter.Limits(null, if (model.contains("3.6-flash")) 20 else null, "America/Los_Angeles"), null
+        )
+        // Groq: 8000 TPM untuk gpt-oss-120b di akun pengguna; model lain bisa berbeda.
+        name.contains("groq", ignoreCase = true) -> Known(null, if (model.contains("gpt-oss-120b")) 8000 else null)
+        else -> Known(null, null)
+    }
+
     private val gson = Gson()
     private val listType = object : TypeToken<List<ProviderConfig>>() {}.type
 

@@ -462,7 +462,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
         for (c in ProviderPresets.parse(store.extraProvidersJson)) {
             if (!c.enabled || c.baseUrl.isBlank() || c.model.isBlank()) continue
-            list += Provider(name = c.name, baseUrl = c.baseUrl, apiKey = c.apiKey, models = listOf(c.model), limitPerAccount = true)
+            val k = ProviderPresets.known(c.name, c.model)
+            list += Provider(
+                name = c.name, baseUrl = c.baseUrl, apiKey = c.apiKey, models = listOf(c.model),
+                limitPerAccount = true, limits = k.limits, tpm = k.tpm
+            )
         }
         if (store.omniUrl.isNotBlank()) {
             list += Provider(

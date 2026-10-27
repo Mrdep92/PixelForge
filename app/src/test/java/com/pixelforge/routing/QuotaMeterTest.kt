@@ -87,3 +87,20 @@ class QuotaMeterTest {
         assertEquals(20, s.perMinute)
     }
 }
+
+class QuotaMeterZoneTest {
+    @Test
+    fun dayResetsAtPacificMidnight() {
+        // 2026-10-23 12:00 UTC = 05:00 PDT; reset = 2026-10-24 00:00 PDT = 07:00 UTC
+        val noon = java.time.ZonedDateTime.of(2026, 10, 23, 12, 0, 0, 0, java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        var now = noon
+        val m = QuotaMeter { now }
+        m.setLimits("Gemini", QuotaMeter.Limits(null, 2, "America/Los_Angeles"))
+        m.record("Gemini"); m.record("Gemini")
+        val v = m.check("Gemini") as QuotaMeter.Verdict.DayExhausted
+        val expected = java.time.ZonedDateTime.of(2026, 10, 24, 7, 0, 0, 0, java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        assertEquals(expected, v.resetAtMs)
+        now = expected + 1
+        assertEquals(QuotaMeter.Verdict.Ok, m.check("Gemini"))
+    }
+}
