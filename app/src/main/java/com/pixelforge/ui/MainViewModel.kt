@@ -171,7 +171,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 stateStore.save("meta:$PROJECT_ID", ProjectMeta(store.ghRepo, store.ghBranch))
                 if (_projectId.value == PROJECT_ID) _meta.value = loadMeta(PROJECT_ID)
             }
-            _bible.value = db.bibleDao().get(_projectId.value)?.content?.takeUnless { isOldTemplate(it) } ?: DEFAULT_BIBLE
+            _bible.value = db.bibleDao().get(_projectId.value)?.content?.takeUnless { Brief.isOldTemplate(it) } ?: DEFAULT_BIBLE
             _settings.value = readSettings()
         }
     }
@@ -203,7 +203,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ci.value = loadCi(id)
         _files.value = wsFor(id).list()
         viewModelScope.launch {
-            _bible.value = db.bibleDao().get(id)?.content?.takeUnless { isOldTemplate(it) } ?: DEFAULT_BIBLE
+            _bible.value = db.bibleDao().get(id)?.content?.takeUnless { Brief.isOldTemplate(it) } ?: DEFAULT_BIBLE
             _settings.value = readSettings()
         }
     }
@@ -511,7 +511,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (echo) {
                 post("USER", "user", text)
                 val pid = _projectId.value
-                val updated = addToBrief(_bible.value, text)
+                val updated = Brief.add(_bible.value, text)
                 _bible.value = updated
                 db.bibleDao().upsert(ProjectBibleEntity(pid, updated, System.currentTimeMillis()))
             }
@@ -779,24 +779,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         private const val DEBUG_SYSTEM =
             "You are the Debugger agent. A CI build failed. Find the root cause from the log and fix it " +
                 "with minimal edits. Reply in Indonesian.\n"
-        val DEFAULT_BIBLE = BRIEF_HEADER
-        private const val BRIEF_HEADER = "# Ringkasan project (otomatis dari chat)"
-        private const val BRIEF_KEEP_LAST = 5
-        private const val BRIEF_ITEM_MAX = 300
-
-        /** Template Bible lama yang tidak pernah diisi dianggap kosong. */
-        fun isOldTemplate(text: String) = text.contains("(Tulis tujuan proyekmu di sini)") || text.contains("(tulis tujuan di sini)")
-
-        /** Ringkasan dari permintaan pengguna: permintaan pertama + 5 terakhir, tanpa panggilan LLM. */
-        fun addToBrief(brief: String, request: String): String {
-            val items = brief.lines().filter { it.startsWith("- ") }.toMutableList()
-            val one = request.trim().replace(Regex("\s+"), " ").take(BRIEF_ITEM_MAX)
-            if (one.isEmpty()) return brief
-            items += "- $one"
-            val kept = if (items.size > BRIEF_KEEP_LAST + 1) listOf(items.first()) + items.takeLast(BRIEF_KEEP_LAST) else items
-            return BRIEF_HEADER + "
-" + kept.joinToString("
-")
-        }
+        val DEFAULT_BIBLE = Brief.HEADER
     }
 }
