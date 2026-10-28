@@ -29,6 +29,7 @@ import com.pixelforge.routing.Privacy
 import com.pixelforge.routing.FreeModels
 import com.pixelforge.routing.LlmExhaustedException
 import com.pixelforge.routing.LlmRouter
+import com.pixelforge.agents.AndroidScaffold
 import com.pixelforge.routing.ProviderConfig
 import com.pixelforge.routing.ProviderPresets
 import com.pixelforge.routing.QuotaMeter
@@ -572,6 +573,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { ContextCompat.startForegroundService(ctx, svc) }
         val router = LlmRouter(providers, quotaMeter)
         try {
+            addAndroidScaffoldIfNeeded()
             if (orchestrator.hasWork()) {
                 val done = orchestrator.execute(
                     fullContext(),
@@ -598,6 +600,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ctx.stopService(svc)
             _busy.value = false
         }
+    }
+
+    /** Proyek Android tanpa Gradle: beri kerangka yang sudah terbukti sebelum agent mulai (file yang sudah ada tidak ditimpa). */
+    private suspend fun addAndroidScaffoldIfNeeded() {
+        if (!AndroidScaffold.wanted(fullContext(), workspace.list())) return
+        val fresh = AndroidScaffold.files(projectName()).filterKeys { !workspace.exists(it) }
+        if (fresh.isEmpty()) return
+        workspace.write(fresh.map { (path, text) -> Workspace.FileOut(path, text) })
+        _files.value = workspace.list()
+        post("SYSTEM", "system", "🧱 Kerangka proyek Android disiapkan (Gradle, Compose, workflow build). Agent hanya menambah kode di app/src/main.")
     }
 
     /** Simpan file dari output agent ke workspace; chat hanya menampilkan ringkasannya. */

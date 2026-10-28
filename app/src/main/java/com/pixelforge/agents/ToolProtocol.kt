@@ -48,6 +48,8 @@ object ToolProtocol {
             "- Never create or edit gradlew, gradlew.bat or gradle/wrapper/*: the app provides them. Existing CI workflows are read-only.\n" +
             "- If the project can be built or tested and the workspace has no file under .github/workflows/, " +
             "add a GitHub Actions workflow that runs on push (all branches) and workflow_dispatch.\n" +
+            "- If the workspace already has settings.gradle.kts and app/build.gradle.kts, they are verified: do not rewrite them. " +
+            "Add code under app/src/main and only add dependencies to app/build.gradle.kts with EDIT.\n" +
             "- Finish with a DONE block.\n"
 
     private val SINGLE = Regex("""^\s*={2,}\s*(READ|LIST|GREP)\s*:\s*(.+?)\s*=*\s*$""", RegexOption.IGNORE_CASE)
