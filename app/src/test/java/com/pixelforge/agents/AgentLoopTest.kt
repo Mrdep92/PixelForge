@@ -227,6 +227,7 @@ class AgentLoopTest {
         assertEquals(3, r.turns)
         assertEquals(listOf("a.txt"), r.changed)
         assertEquals("hi", exec.files["a.txt"])
-        assertTrue(seen[1].last().content.contains("hello"))   // hasil READ sampai ke model
+        val sent = seen.last().joinToString("\n") { it.content }   // daftar pesan dibagi (bukan salinan), jadi periksa isi akhirnya
+        assertTrue(sent.contains("hello") && sent.contains("DONE kamu diabaikan"))
     }
 }
