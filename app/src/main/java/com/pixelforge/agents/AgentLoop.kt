@@ -52,6 +52,15 @@ class AgentLoop(
                 }
             }
             onStep("putaran $turn/$maxTurns — " + steps.joinToString(", "))
+            // Model sering menulis READ/LIST/GREP dan DONE dalam satu balasan, padahal hasil bacaan belum ia lihat.
+            // DONE seperti itu tidak boleh menutup tugas: kirim hasilnya dulu (kecuali sudah putaran terakhir).
+            val inspecting = calls.any { it is ToolProtocol.Call.Read || it is ToolProtocol.Call.ListDir || it is ToolProtocol.Call.Grep }
+            if (done != null && inspecting && changed.isEmpty() && turn < maxTurns) {
+                msgs += Msg("user", "Hasil tool:\n\n" + results.toString().trim() +
+                    "\n\nDONE kamu diabaikan karena dikirim bersama perintah baca, sebelum kamu melihat hasilnya. " +
+                    "Lanjutkan dengan FILE/EDIT berdasarkan hasil di atas, lalu kirim DONE sendirian.")
+                continue
+            }
             if (done != null) {
                 return Result(done.ifBlank { "Selesai." }, changed.toList(), turn, true)
             }

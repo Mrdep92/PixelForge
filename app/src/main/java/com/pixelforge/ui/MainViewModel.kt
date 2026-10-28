@@ -30,6 +30,7 @@ import com.pixelforge.routing.FreeModels
 import com.pixelforge.routing.LlmExhaustedException
 import com.pixelforge.routing.LlmRouter
 import com.pixelforge.agents.AndroidScaffold
+import com.pixelforge.agents.CiAutoFix
 import com.pixelforge.routing.ProviderConfig
 import com.pixelforge.routing.ProviderPresets
 import com.pixelforge.routing.QuotaMeter
@@ -713,6 +714,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         setCi(CiState())
                         return
                     }
+                    val auto = CiAutoFix.plan(workspace.readAll(), projectName())
+                    if (auto.isNotEmpty()) {
+                        workspace.write(auto.map { (path, text) -> Workspace.FileOut(path, text) })
+                        _files.value = workspace.list()
+                        post("SYSTEM", "system", "🔧 Penyebab pasti: workflow memanggil ./gradlew padahal wrapper tidak ada. Aplikasi mengganti workflow dengan yang terbukti" +
+                            (if (auto.keys.any { it.startsWith("app/") }) " dan menambah kerangka Gradle" else "") + ": " + auto.keys.joinToString())
+                        attempt++
+                        fixed = true
+                        setCi(CiState(true, log, attempt, true))
+                    } else {
                     post("SYSTEM", "system", "🛠 Debugger memperbaiki error (percobaan ${attempt + 1}/$MAX_FIX)...")
                     val run = runToolAgent(
                         router,
@@ -729,6 +740,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     attempt++
                     fixed = true
                     setCi(CiState(true, log, attempt, true))
+                    }
                 }
                 post("SYSTEM", "system", "📤 Commit ke GitHub ($repo)...")
                 val sha = gh.commitFiles(workspace.readAll(), "PixelForge agents: update workspace")

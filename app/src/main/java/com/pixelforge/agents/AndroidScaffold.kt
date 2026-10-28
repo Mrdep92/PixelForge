@@ -7,6 +7,8 @@ package com.pixelforge.agents
  */
 object AndroidScaffold {
 
+    const val WORKFLOW_PATH = ".github/workflows/build-apk.yml"
+
     private val NAME_RE = Regex("[^a-z0-9]")
 
     /** Nama paket aman dari nama project: huruf kecil + angka, diawali huruf. */

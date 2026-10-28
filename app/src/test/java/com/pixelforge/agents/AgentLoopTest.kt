@@ -207,4 +207,26 @@ class AgentLoopTest {
         assertTrue(results.contains("src/a.kt:1"))
         assertTrue(results.contains("src/b.kt"))
     }
+
+    @Test
+    fun doneSentTogetherWithReadsDoesNotEndTheTask() = runBlocking {
+        val exec = FakeExec(mapOf("a.txt" to "hello"))
+        val seen = mutableListOf<List<AgentLoop.Msg>>()
+        val loop = AgentLoop(
+            scripted(
+                listOf(
+                    "=== READ: a.txt ===\n=== DONE ===\nTunggu hasil inspeksi dulu.\n=== END DONE ===",
+                    "=== EDIT: a.txt ===\n<<<<<<< SEARCH\nhello\n=======\nhi\n>>>>>>> REPLACE\n=== END EDIT ===",
+                    "=== DONE ===\nSelesai.\n=== END DONE ==="
+                ),
+                seen
+            ),
+            exec
+        )
+        val r = loop.run("sys", "ubah")
+        assertEquals(3, r.turns)
+        assertEquals(listOf("a.txt"), r.changed)
+        assertEquals("hi", exec.files["a.txt"])
+        assertTrue(seen[1].last().content.contains("hello"))   // hasil READ sampai ke model
+    }
 }
