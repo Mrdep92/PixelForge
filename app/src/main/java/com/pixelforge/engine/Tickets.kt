@@ -40,7 +40,7 @@ object TicketPlanner {
                 val ex = spec.files.firstOrNull { it.path == u }?.exports.orEmpty()
                 if (ex.isEmpty()) u else "$u: " + ex.joinToString("; ")
             }
-            Ticket("T${i + 1}", f.path, f.uses, goal, accept, interfaces, spec.facts, f.exports)
+            Ticket("T${i + 1}", f.path, f.uses, goal, accept, interfaces, Cards.factsFor(f.cards) + spec.facts, f.exports)
         }
     }
 }

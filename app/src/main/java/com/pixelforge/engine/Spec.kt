@@ -7,7 +7,14 @@ import com.google.gson.JsonParser
 data class Feature(val id: String, val title: String, val accept: List<String>)
 
 /** Satu file yang boleh ada. [exports] = tanda tangan yang dijanjikan; [uses] = file lain yang dipakainya. */
-data class FileSpec(val path: String, val features: List<String>, val exports: List<String>, val uses: List<String>)
+data class FileSpec(
+    val path: String,
+    val features: List<String>,
+    val exports: List<String>,
+    val uses: List<String>,
+    /** Id kartu pengetahuan yang dibutuhkan file ini (hanya itu yang masuk tiketnya). */
+    val cards: List<String> = emptyList()
+)
 
 /** Sumber kebenaran proyek: dibuat sekali oleh tahap blueprint, lalu divalidasi kode. */
 data class AppSpec(
@@ -59,7 +66,7 @@ object SpecParser {
             Feature(f.str("id"), f.str("title"), f.strList("accept"))
         }
         val files = root.objList("files").map { f ->
-            FileSpec(f.str("path"), f.strList("features"), f.strList("exports"), f.strList("uses"))
+            FileSpec(f.str("path"), f.strList("features"), f.strList("exports"), f.strList("uses"), f.strList("cards"))
         }
         return SpecResult.Ok(
             AppSpec(
@@ -112,6 +119,7 @@ object SpecValidator {
             f.features.filter { it !in featureIds }.forEach { errors += "${f.path} merujuk fitur yang tidak ada: $it." }
             f.uses.filter { it !in paths }.forEach { errors += "${f.path} memakai file yang tidak ada: $it." }
             if (f.path in f.uses) errors += "${f.path} memakai dirinya sendiri."
+            f.cards.filter { !Cards.known(it) }.forEach { errors += "${f.path} meminta kartu yang tidak dikenal: $it." }
         }
         val covered = spec.files.flatMap { it.features }.toSet()
         featureIds.filter { it.isNotBlank() && it !in covered }.forEach { errors += "Fitur $it tidak punya file." }
