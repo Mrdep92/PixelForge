@@ -13,7 +13,13 @@ sealed class InterviewStep {
  * tiap pertanyaan membawa jawaban rekomendasi, selesai bila tidak ada pertanyaan tersisa, dan tidak membangun apa pun
  * sebelum pengguna menyetujui. Dibatasi [MAX_ROUNDS] putaran supaya hemat jatah.
  */
-class Interview(private val idea: String, private val llm: Llm) {
+class Interview(
+    private val idea: String,
+    private val llm: Llm,
+    initialAnswered: List<Pair<String, String>> = emptyList(),
+    initialRounds: Int = 0,
+    initialPending: List<Question> = emptyList()
+) {
 
     companion object {
         const val MAX_ROUNDS = 3
@@ -57,9 +63,9 @@ class Interview(private val idea: String, private val llm: Llm) {
         }
     }
 
-    private val answered = mutableListOf<Pair<String, String>>()
-    private var pending: List<Question> = emptyList()
-    var rounds = 0
+    private val answered = initialAnswered.toMutableList()
+    private var pending: List<Question> = initialPending
+    var rounds = initialRounds
         private set
     var calls = 0
         private set
@@ -74,6 +80,9 @@ class Interview(private val idea: String, private val llm: Llm) {
         if (lastRound) sb.append("This is the last round: reply STATUS: READY and decide anything still open yourself, listing it as ASSUMPTION lines.\n")
         return sb.toString()
     }
+
+    fun answeredPairs(): List<Pair<String, String>> = answered.toList()
+    fun pendingQuestions(): List<Question> = pending
 
     /** Putaran berikutnya: satu panggilan. Setelah putaran terakhir selalu Ready. */
     suspend fun next(): InterviewStep {

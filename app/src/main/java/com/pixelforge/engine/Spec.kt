@@ -128,3 +128,32 @@ object SpecValidator {
         return errors
     }
 }
+
+/** Tulis spec kembali ke JSON dengan skema yang sama dengan yang dibaca [SpecParser]. */
+object SpecJson {
+    fun write(spec: AppSpec): String {
+        val root = com.google.gson.JsonObject()
+        root.add("app", com.google.gson.JsonObject().apply {
+            addProperty("name", spec.name); addProperty("kind", spec.kind); addProperty("lang", spec.lang)
+        })
+        fun arr(items: List<String>) = com.google.gson.JsonArray().apply { items.forEach { add(it) } }
+        root.add("features", com.google.gson.JsonArray().apply {
+            spec.features.forEach { f ->
+                add(com.google.gson.JsonObject().apply {
+                    addProperty("id", f.id); addProperty("title", f.title); add("accept", arr(f.accept))
+                })
+            }
+        })
+        root.add("files", com.google.gson.JsonArray().apply {
+            spec.files.forEach { f ->
+                add(com.google.gson.JsonObject().apply {
+                    addProperty("path", f.path); add("features", arr(f.features)); add("exports", arr(f.exports))
+                    add("uses", arr(f.uses)); add("cards", arr(f.cards))
+                })
+            }
+        })
+        root.add("facts", arr(spec.facts))
+        root.add("decisions", arr(spec.decisions))
+        return root.toString()
+    }
+}

@@ -11,6 +11,7 @@ data class Event(
     val ts: Long = 0L
 ) {
     companion object {
+        const val RUN_STARTED = "RUN_STARTED"
         const val BLUEPRINT_APPROVED = "BLUEPRINT_APPROVED"
         const val TICKET_STARTED = "TICKET_STARTED"
         const val TICKET_PASSED = "TICKET_PASSED"
@@ -44,7 +45,10 @@ class InMemoryEventLog(initial: List<Event> = emptyList()) : EventLog {
 /** Keadaan run yang diturunkan dari log. */
 data class RunState(val passed: Set<String>, val failed: Map<String, String>, val calls: Int) {
     companion object {
-        fun from(events: List<Event>): RunState {
+        /** Hanya kejadian sejak RUN_STARTED terakhir yang dihitung, supaya run baru tidak mewarisi tiket run lama. */
+        fun from(all: List<Event>): RunState {
+            val start = all.indexOfLast { it.type == Event.RUN_STARTED }
+            val events = if (start >= 0) all.subList(start + 1, all.size) else all
             val passed = linkedSetOf<String>()
             val failed = linkedMapOf<String, String>()
             var calls = 0
