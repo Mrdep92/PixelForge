@@ -12,6 +12,8 @@ interface FileStore {
     fun read(path: String): String?
     fun write(path: String, content: String)
     fun all(): Map<String, String>
+    /** Hapus file; bawaan: tidak melakukan apa-apa. */
+    fun delete(path: String) {}
 }
 
 class MemoryStore(initial: Map<String, String> = emptyMap()) : FileStore {
@@ -19,6 +21,7 @@ class MemoryStore(initial: Map<String, String> = emptyMap()) : FileStore {
     override fun read(path: String): String? = files[path]
     override fun write(path: String, content: String) { files[path] = content }
     override fun all(): Map<String, String> = files.toMap()
+    override fun delete(path: String) { files.remove(path) }
 }
 
 data class RunReport(

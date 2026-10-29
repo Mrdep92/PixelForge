@@ -47,6 +47,12 @@ class Workspace(context: Context, projectId: String = "default") {
     }
 
     @Synchronized
+    fun delete(path: String) {
+        val f = File(root, path)
+        if (f.canonicalPath.startsWith(root.canonicalPath + File.separator) && f.isFile) f.delete()
+    }
+
+    @Synchronized
     fun exists(path: String): Boolean {
         val f = File(root, path)
         return f.canonicalPath.startsWith(root.canonicalPath + File.separator) && f.isFile

@@ -17,6 +17,7 @@ class WorkspaceStore(private val ws: Workspace) : FileStore {
         ws.write(listOf(Workspace.FileOut(path, content)))
     }
     override fun all(): Map<String, String> = ws.readAll()
+    override fun delete(path: String) { ws.delete(path) }
 }
 
 /** Log kejadian yang tersimpan di penyimpanan aplikasi, supaya run bisa dilanjutkan setelah aplikasi ditutup. */

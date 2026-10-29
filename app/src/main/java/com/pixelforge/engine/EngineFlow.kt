@@ -141,7 +141,16 @@ class EngineFlow(
 
     private suspend fun makeBlueprint(brief: String): List<Say> {
         return when (val r = Blueprint.run(llm, brief)) {
-            is BlueprintResult.Ok -> {
+            is BlueprintResult.Ok -> if (!Relevance.matches(state.idea, r.spec)) {
+                set(state.copy(stage = Stage.IDLE, brief = brief))
+                listOf(
+                    Say(
+                        "SYSTEM",
+                        "Blueprint tidak sesuai ide (\"${r.spec.name}\" tidak menyinggung isi ide). Tidak ada file yang ditulis. " +
+                            "Kirim ide lagi dengan kata kunci yang jelas."
+                    )
+                )
+            } else {
                 set(state.copy(stage = Stage.REVIEW, brief = brief, specJson = SpecJson.write(r.spec), pending = emptyList()))
                 listOf(Say("BLUEPRINT", describe(r.spec, maxCalls)))
             }
@@ -166,6 +175,9 @@ class EngineFlow(
         if (state.stage != Stage.RUNNING) {
             log.append(Event(Event.RUN_STARTED, null, spec.name, 0, clock()))
             log.append(Event(Event.BLUEPRINT_APPROVED, null, spec.name, 0, clock()))
+            // Mulai bersih: file sisa dari percobaan lama yang tidak ada di blueprint dihapus.
+            val keep = spec.files.map { it.path }.toSet()
+            store.all().keys.filter { it !in keep }.forEach { store.delete(it) }
             set(state.copy(stage = Stage.RUNNING))
         }
         val report = TicketRunner(llm, store, log, maxCalls, clock = clock).run(spec, onProgress)
