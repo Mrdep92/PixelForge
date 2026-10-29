@@ -203,6 +203,7 @@ class EngineFlow(
             }
             else -> {
                 set(state.copy(stage = Stage.DONE))
+                store.write("PROJECT.md", ProjectNotes.render(spec))
                 out += Say("TIKET", "Selesai: ${report.passed.size} file dibuat dengan ${report.calls} panggilan. Buka tab Preview untuk mencobanya.")
                 out
             }
