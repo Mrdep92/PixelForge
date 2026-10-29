@@ -201,6 +201,16 @@ fun SettingsScreen(vm: MainViewModel) {
             color = Color.Gray, fontSize = 12.sp
         )
 
+        SectionTitle("Mesin pembuat")
+        val engineOn by vm.engineOn.collectAsStateWithLifecycle()
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Mesin baru (web/PWA): wawancara, blueprint, lalu tiket otomatis. Matikan untuk memakai alur lama (Android).",
+                color = Color.Gray, fontSize = 12.sp, modifier = Modifier.weight(1f)
+            )
+            Switch(checked = engineOn, onCheckedChange = { vm.setEngineOn(it) })
+        }
+
         PoolSection(vm)
 
         SectionTitle("OmniRoute / endpoint kompatibel OpenAI")

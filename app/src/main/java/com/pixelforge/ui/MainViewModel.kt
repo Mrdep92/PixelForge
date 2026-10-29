@@ -138,6 +138,52 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _bible = MutableStateFlow(DEFAULT_BIBLE)
+    private val _engineOn = MutableStateFlow(stateStore.loadRaw("engine_mode") != "off")
+    val engineOn = _engineOn.asStateFlow()
+    private val _stage = MutableStateFlow(com.pixelforge.engine.FlowStateStore.load(stateStore, _projectId.value).stage)
+    val stage = _stage.asStateFlow()
+    private val _progress = MutableStateFlow("")
+    val progress = _progress.asStateFlow()
+
+    fun setEngineOn(on: Boolean) {
+        stateStore.saveRaw("engine_mode", if (on) "on" else "off")
+        _engineOn.value = on
+    }
+
+    /** Isi file project untuk tab Preview. */
+    fun readProjectFile(path: String): String? = workspace.takeIf { it.exists(path) }?.read(path)
+
+    private suspend fun runEngine(text: String, providers: List<Provider>) {
+        val pid = _projectId.value
+        _busy.value = true
+        val router = LlmRouter(providers, quotaMeter)
+        try {
+            val flow = com.pixelforge.engine.EngineFlow(
+                com.pixelforge.engine.RouterLlm(router),
+                com.pixelforge.engine.WorkspaceStore(wsFor(pid)),
+                com.pixelforge.engine.PersistentEventLog(stateStore, "events:$pid"),
+                com.pixelforge.engine.FlowStateStore.load(stateStore, pid),
+                onState = {
+                    com.pixelforge.engine.FlowStateStore.save(stateStore, pid, it)
+                    if (pid == _projectId.value) _stage.value = it.stage
+                }
+            )
+            val says = flow.handle(text) { _progress.value = it }
+            says.forEach { post("AGENT", "assistant", it.text, it.who, pid) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: LlmExhaustedException) {
+            post("SYSTEM", "system", "⏸ ${e.message} Progres tersimpan; ketik **lanjut** nanti.", null, pid)
+        } catch (e: Exception) {
+            post("SYSTEM", "system", "⚠ ${e.message}", null, pid)
+        } finally {
+            router.close()
+            _progress.value = ""
+            _files.value = wsFor(pid).list()
+            _busy.value = false
+        }
+    }
+
     private val _busy = MutableStateFlow(false)
     val busy = _busy.asStateFlow()
 
@@ -204,6 +250,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _meta.value = loadMeta(id)
         _ci.value = loadCi(id)
         _files.value = wsFor(id).list()
+        _stage.value = com.pixelforge.engine.FlowStateStore.load(stateStore, id).stage
         viewModelScope.launch {
             _bible.value = db.bibleDao().get(id)?.content?.takeUnless { Brief.isOldTemplate(it) } ?: DEFAULT_BIBLE
             _settings.value = readSettings()
@@ -523,6 +570,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             val providers = allowedProviders { doSend(text, false) }
             if (providers.isEmpty()) return@launch
+            if (_engineOn.value) { runEngine(text, providers); return@launch }
             _busy.value = true
             val router = LlmRouter(providers, quotaMeter)
             try {

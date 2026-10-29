@@ -69,7 +69,10 @@ fun ChatScreen(vm: MainViewModel) {
                 )
             ) { Text("🗑 Bersihkan") }
         }
-        TeamStrip(agents)
+        val engineOn by vm.engineOn.collectAsStateWithLifecycle()
+        val stage by vm.stage.collectAsStateWithLifecycle()
+        val progress by vm.progress.collectAsStateWithLifecycle()
+        if (engineOn) StageStrip(stage, progress) else TeamStrip(agents)
         Spacer(Modifier.height(6.dp))
 
         if (messages.isEmpty()) {
@@ -235,5 +238,34 @@ private fun TeamStrip(agents: List<Agent>) {
                 )
             }
         }
+    }
+}
+
+/** Penanda tahap alur baru: Wawancara → Blueprint → Validasi → Eksekusi. */
+@Composable
+private fun StageStrip(stage: String, progress: String) {
+    val names = listOf("Wawancara", "Blueprint", "Validasi", "Eksekusi")
+    val current = when (stage) {
+        "INTERVIEW" -> 0
+        "REVIEW" -> 1
+        "RUNNING" -> 3
+        "DONE" -> 4
+        else -> -1
+    }
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            names.forEachIndexed { i, n ->
+                val color = when {
+                    i < current -> Color(0xFF69F0AE)
+                    i == current -> Color(0xFF00E5FF)
+                    else -> Color(0xFF455A64)
+                }
+                Text(
+                    n, color = Color.White, fontSize = 11.sp, maxLines = 1,
+                    modifier = Modifier.background(color.copy(alpha = 0.35f), RoundedCornerShape(16.dp)).padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+        if (progress.isNotBlank()) Text(progress, color = Color.Gray, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
     }
 }

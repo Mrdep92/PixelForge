@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -17,6 +18,7 @@ import com.pixelforge.ui.components.ProjectBar
 import com.pixelforge.ui.screens.approval.ApprovalScreen
 import com.pixelforge.ui.screens.chat.ChatScreen
 import com.pixelforge.ui.screens.files.FilesScreen
+import com.pixelforge.ui.screens.preview.PreviewScreen
 import com.pixelforge.ui.screens.settings.SettingsScreen
 
 @Composable
@@ -42,6 +44,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                     label = { Text("Approvals") }
                 )
                 NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.Folder, "Files") }, label = { Text("Files") })
+                NavigationBarItem(tab == 4, { tab = 4 }, { Icon(Icons.Default.PlayArrow, "Preview") }, label = { Text("Preview") })
                 NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Default.Settings, "Settings") }, label = { Text("Settings") })
             }
         }
@@ -52,6 +55,7 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                 1 -> ApprovalScreen(vm)
                 2 -> FilesScreen(vm)
                 3 -> SettingsScreen(vm)
+                4 -> PreviewScreen(vm)
             }
         }
     }
