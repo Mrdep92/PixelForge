@@ -48,6 +48,10 @@ class EngineFlow(
         fun isApproval(text: String): Boolean =
             text.trim().lowercase().trim('.', '!', ' ', ',') in APPROVE
 
+        /** Pintu murah tanpa LLM: sapaan atau kalimat terlalu pendek bukan ide aplikasi. */
+        fun looksLikeIdea(text: String): Boolean =
+            text.trim().split(Regex("\\s+")).count { it.isNotEmpty() } >= 3
+
         fun estimate(spec: AppSpec): String {
             val n = spec.files.size
             return "sekitar $n sampai ${n + n / 2 + 1} panggilan"
@@ -85,7 +89,9 @@ class EngineFlow(
             Stage.RUNNING ->
                 if (isApproval(t)) run(onProgress)
                 else listOf(Say("SYSTEM", "Pembuatan berhenti di tengah jalan. Ketik **lanjut** untuk melanjutkan."))
-            else -> startIdea(t)
+            else -> if (!looksLikeIdea(t)) listOf(
+                Say("SYSTEM", "Ceritakan aplikasi yang ingin dibuat dalam satu kalimat, misalnya: \"buat web waktu sholat dan arah kiblat\". Belum ada panggilan LLM yang terpakai.")
+            ) else startIdea(t)
         }
     }
 

@@ -31,7 +31,7 @@ class EngineFlowTest {
         val store = MemoryStore()
         val flow = EngineFlow(llm, store, InMemoryEventLog())
 
-        val m1 = flow.handle("web sholat")
+        val m1 = flow.handle("buat web sholat harian")
         assertEquals(Stage.INTERVIEW, flow.state.stage)
         assertTrue(m1[0].text.contains("saran: GPS"))
 
@@ -51,7 +51,7 @@ class EngineFlowTest {
         var saved: String? = null
         val llm1 = Replies(listOf(ask))
         val f1 = EngineFlow(llm1, MemoryStore(), InMemoryEventLog(), onState = { saved = Gson().toJson(it) })
-        f1.handle("ide")
+        f1.handle("buat aplikasi sederhana ide")
         val restored = Gson().fromJson(saved, FlowState::class.java)
         val llm2 = Replies(listOf(ready, spec))
         val f2 = EngineFlow(llm2, MemoryStore(), InMemoryEventLog(), restored)
@@ -63,7 +63,7 @@ class EngineFlowTest {
     @Test fun revisionRerunsBlueprintOnly() = runBlocking {
         val llm = Replies(listOf(ready, spec, spec))
         val flow = EngineFlow(llm, MemoryStore(), InMemoryEventLog())
-        flow.handle("ide")                               // langsung Ready → blueprint
+        flow.handle("buat aplikasi sederhana ide")                               // langsung Ready → blueprint
         assertEquals(Stage.REVIEW, flow.state.stage)
         flow.handle("tambahkan mode gelap")
         assertEquals(Stage.REVIEW, flow.state.stage)
@@ -86,7 +86,7 @@ class EngineFlowTest {
             }
         }
         val flow = EngineFlow(flaky, store, log)
-        flow.handle("ide")
+        flow.handle("buat aplikasi sederhana ide")
         try { flow.handle("setuju"); fail("harus melempar") } catch (e: IllegalStateException) {}
         assertEquals(Stage.RUNNING, flow.state.stage)
         assertTrue(store.files.containsKey("js/a.js"))
@@ -113,5 +113,13 @@ class EngineFlowTest {
     @Test fun approvalWords() {
         assertTrue(EngineFlow.isApproval(" Setuju! "))
         assertFalse(EngineFlow.isApproval("tambahkan fitur"))
+    }
+
+    @Test fun greetingDoesNotCallLlm() = kotlinx.coroutines.runBlocking {
+        var calls = 0
+        val llm = object : Llm { override suspend fun call(system: String, user: String): String { calls++; return "" } }
+        val flow = EngineFlow(llm, MemoryStore(), InMemoryEventLog())
+        val m = flow.handle("halo")
+        assertTrue(calls == 0 && m[0].who == "SYSTEM")
     }
 }

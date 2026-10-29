@@ -32,6 +32,7 @@ class Interview(
                 "- Each question must come with your recommended answer so the user can just accept it.\n" +
                 "- At most $MAX_QUESTIONS questions per round. Short, concrete, one topic each.\n" +
                 "- The app is a plain HTML/CSS/JavaScript web page or PWA. Do not ask about frameworks or hosting.\n" +
+                "- Write questions and recommended answers in Indonesian (the user's language).\n" +
                 "- Finish as soon as nothing important is open.\n" +
                 "Reply in EXACTLY one of these formats, nothing else:\n" +
                 "STATUS: ASK\n" +
