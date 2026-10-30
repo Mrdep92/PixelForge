@@ -118,7 +118,8 @@ class EngineFlow(
             Stage.RUNNING ->
                 if (isApproval(t)) run(onProgress)
                 else listOf(Say("SYSTEM", "Pembuatan berhenti di tengah jalan. Ketik **lanjut** untuk melanjutkan."))
-            else -> if (!looksLikeIdea(t)) listOf(
+            else -> if (state.stage == Stage.IDLE && state.brief.isNotBlank() && (isApproval(t) || t.lowercase() == "ulang")) makeBlueprint(state.brief)
+            else if (!looksLikeIdea(t)) listOf(
                 Say("SYSTEM", "Ceritakan aplikasi yang ingin dibuat dalam satu kalimat, misalnya: \"buat web waktu sholat dan arah kiblat\". Belum ada panggilan LLM yang terpakai.")
             ) else startIdea(t)
         }
@@ -195,7 +196,7 @@ class EngineFlow(
                     Say(
                         "SYSTEM",
                         "Blueprint belum lolos pemeriksaan:\n" + r.problems.take(5).joinToString("\n") { "- $it" } +
-                            "\nKirim ide dengan lebih jelas atau lebih sederhana, lalu coba lagi."
+                            "\nKetik **ulang** untuk mencoba lagi (jawaban wawancara tidak hilang), atau kirim ide yang lebih sederhana."
                     )
                 )
             }

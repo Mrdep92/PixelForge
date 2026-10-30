@@ -69,7 +69,7 @@ class LlmRouter(private val providers: List<Provider>, private val meter: QuotaM
         val model: String,
         val messages: List<ChatMessage>,
         val temperature: Double = 0.7,
-        val max_tokens: Int = 4096
+        val max_tokens: Int = 8192
     )
     data class Choice(val message: ChatMessage?, val finish_reason: String? = null)
     data class ChatResponse(val choices: List<Choice>?)

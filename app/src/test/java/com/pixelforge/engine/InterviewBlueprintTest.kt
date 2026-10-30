@@ -77,14 +77,14 @@ class InterviewBlueprintTest {
         assertTrue(TicketPlanner.plan(r.spec).first { it.file == "index.html" }.facts.isEmpty())   // kartu hanya untuk file yang butuh
     }
 
-    @Test fun blueprintRepairsOnceThenFails() = runBlocking {
+    @Test fun blueprintRepairsTwiceThenFails() = runBlocking {
         val bad = goodSpec.replace("prayer-times", "kartu-ngarang")
         val fixedLlm = Seq(listOf(bad, goodSpec))
         assertTrue(Blueprint.run(fixedLlm, "b") is BlueprintResult.Ok)
         assertTrue(fixedLlm.users[1].contains("PROBLEMS") && fixedLlm.users[1].contains("kartu-ngarang"))
         val stuck = Seq(listOf(bad))
         val f = Blueprint.run(stuck, "b") as BlueprintResult.Failed
-        assertEquals(2, f.calls)
+        assertEquals(3, f.calls)
         assertTrue(f.problems.any { "tidak dikenal" in it })
     }
 

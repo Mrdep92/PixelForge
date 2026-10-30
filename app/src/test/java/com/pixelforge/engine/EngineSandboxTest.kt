@@ -121,6 +121,27 @@ class EngineSandboxTest {
         assertTrue(llm.users[2].contains("tests:") && llm.users[2].contains("tidak dijanjikan"))
     }
 
+    @Test fun cutOffBlueprintIsRetriedShorterWithoutEchoingTheFragment() = runBlocking {
+        val cut = spec.take(120)                                    // JSON terpotong di tengah
+        val llm = SandboxScriptedLlm(listOf(ready, cut, spec))
+        val (f, _, _) = flow(llm, null)
+        f.handle("buat web sholat harian")
+        assertEquals(Stage.REVIEW, f.state.stage)
+        assertTrue(llm.users[2].contains("CUT OFF"))
+        assertFalse(llm.users[2].contains("PREVIOUS REPLY:"))
+    }
+
+    @Test fun failedBlueprintCanBeRetriedWithUlang() = runBlocking {
+        val cut = spec.take(120)
+        val llm = SandboxScriptedLlm(listOf(ready, cut, cut, cut, spec))   // 1 + 2 perbaikan gagal, lalu "ulang" berhasil
+        val (f, _, _) = flow(llm, null)
+        val m = f.handle("buat web sholat harian")
+        assertEquals(Stage.IDLE, f.state.stage)
+        assertTrue(m[0].text.contains("ulang"))
+        f.handle("ulang")
+        assertEquals(Stage.REVIEW, f.state.stage)
+    }
+
     @Test fun implicatedFilesFollowFailures() {
         val s = (SpecParser.parse(spec) as SpecResult.Ok).spec
         val plan = (PlanParser.parse(spec) as PlanResult.Ok).plan
