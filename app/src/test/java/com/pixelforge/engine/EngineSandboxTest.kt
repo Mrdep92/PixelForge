@@ -4,7 +4,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 
-private class Script(private val replies: List<String>) : Llm {
+private class SandboxScriptedLlm(private val replies: List<String>) : Llm {
     val users = mutableListOf<String>()
     private var i = 0
     override suspend fun call(system: String, user: String): String {
@@ -51,7 +51,7 @@ class EngineSandboxTest {
     }
 
     @Test fun blueprintCarriesTestsIntoState() = runBlocking {
-        val (f, _, _) = flow(Script(listOf(ready, spec)), null)
+        val (f, _, _) = flow(SandboxScriptedLlm(listOf(ready, spec)), null)
         val says = f.handle("buat web sholat harian")
         assertEquals(Stage.REVIEW, f.state.stage)
         assertTrue(f.state.planJson.contains("hitung"))
@@ -60,7 +60,7 @@ class EngineSandboxTest {
 
     @Test fun passesWhenSandboxPasses() = runBlocking {
         val sb = FakeSandbox(listOf(ok))
-        val llm = Script(listOf(ready, spec, js, html))
+        val llm = SandboxScriptedLlm(listOf(ready, spec, js, html))
         val (f, store, _) = flow(llm, sb)
         toRunning(f)
         val m = f.handle("setuju")
@@ -74,7 +74,7 @@ class EngineSandboxTest {
 
     @Test fun debuggerFixesCodeBugThenPasses() = runBlocking {
         val sb = FakeSandbox(listOf(codeBug, ok))
-        val llm = Script(listOf(ready, spec, js, html, jsFixed))
+        val llm = SandboxScriptedLlm(listOf(ready, spec, js, html, jsFixed))
         val (f, store, _) = flow(llm, sb)
         toRunning(f)
         val m = f.handle("setuju")
@@ -89,7 +89,7 @@ class EngineSandboxTest {
 
     @Test fun stopsAfterTwoRoundsAndKeepsRunning() = runBlocking {
         val sb = FakeSandbox(listOf(codeBug))                 // selalu gagal
-        val llm = Script(listOf(ready, spec, js, html, jsFixed))
+        val llm = SandboxScriptedLlm(listOf(ready, spec, js, html, jsFixed))
         val (f, _, _) = flow(llm, sb)
         toRunning(f)
         val m = f.handle("setuju")
@@ -102,7 +102,7 @@ class EngineSandboxTest {
     @Test fun unverifiedExpectationDoesNotTriggerDebugger() = runBlocking {
         val unverifiedSpec = spec.replace("\"verified\":true", "\"verified\":false")
         val sb = FakeSandbox(listOf(testBug))
-        val llm = Script(listOf(ready, unverifiedSpec, js, html))
+        val llm = SandboxScriptedLlm(listOf(ready, unverifiedSpec, js, html))
         val (f, _, _) = flow(llm, sb)
         toRunning(f)
         val m = f.handle("setuju")
@@ -114,7 +114,7 @@ class EngineSandboxTest {
 
     @Test fun invalidTestsTriggerBlueprintRepair() = runBlocking {
         val bad = spec.replace("\"fn\":\"hitung\"", "\"fn\":\"tidakAda\"")
-        val llm = Script(listOf(ready, bad, spec))
+        val llm = SandboxScriptedLlm(listOf(ready, bad, spec))
         val (f, _, _) = flow(llm, null)
         f.handle("buat web sholat harian")
         assertEquals(Stage.REVIEW, f.state.stage)
