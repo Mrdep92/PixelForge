@@ -6,7 +6,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.List
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -18,23 +17,23 @@ import com.pixelforge.ui.components.ProjectBar
 import com.pixelforge.ui.screens.approval.ApprovalScreen
 import com.pixelforge.ui.screens.chat.ChatScreen
 import com.pixelforge.ui.screens.files.FilesScreen
-import com.pixelforge.ui.screens.preview.PreviewScreen
 import com.pixelforge.ui.screens.settings.SettingsScreen
 
 @Composable
 fun MainScreen(vm: MainViewModel = viewModel()) {
     var tab by remember { mutableIntStateOf(0) }
     val approvals by vm.approvals.collectAsStateWithLifecycle()
+    val engineOn by vm.engineOn.collectAsStateWithLifecycle()
 
     // Rencana baru siap → langsung buka tab Approvals
-    LaunchedEffect(approvals.isNotEmpty()) { if (approvals.isNotEmpty()) tab = 1 }
+    LaunchedEffect(approvals.isNotEmpty(), engineOn) { if (approvals.isNotEmpty() && !engineOn) tab = 1 }
 
     Scaffold(
         topBar = { ProjectBar(vm) },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Default.Chat, "Chat") }, label = { Text("Chat") })
-                NavigationBarItem(
+                if (!engineOn) NavigationBarItem(
                     tab == 1, { tab = 1 },
                     {
                         BadgedBox(badge = { if (approvals.isNotEmpty()) Badge { Text("${approvals.size}") } }) {
@@ -44,18 +43,16 @@ fun MainScreen(vm: MainViewModel = viewModel()) {
                     label = { Text("Approvals") }
                 )
                 NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.Folder, "Files") }, label = { Text("Files") })
-                NavigationBarItem(tab == 4, { tab = 4 }, { Icon(Icons.Default.PlayArrow, "Preview") }, label = { Text("Preview") })
                 NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.Default.Settings, "Settings") }, label = { Text("Settings") })
             }
         }
     ) { pad ->
         Box(Modifier.padding(pad)) {
-            when (tab) {
+            when (if (engineOn && tab == 1) 0 else tab) {
                 0 -> ChatScreen(vm)
                 1 -> ApprovalScreen(vm)
                 2 -> FilesScreen(vm)
                 3 -> SettingsScreen(vm)
-                4 -> PreviewScreen(vm)
             }
         }
     }

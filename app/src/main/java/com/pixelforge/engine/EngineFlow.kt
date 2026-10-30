@@ -21,7 +21,10 @@ data class FlowState(
     val pending: List<QA> = emptyList(),
     val rounds: Int = 0,
     val brief: String = "",
-    val specJson: String = ""
+    val specJson: String = "",
+    val planJson: String = "",
+    val calls: Int = 0,
+    val tokens: Int = 0
 )
 
 /**
@@ -29,20 +32,25 @@ data class FlowState(
  * Semua keputusan alur ada di kode; model hanya dipanggil di dalam tahap. Tidak ada riwayat percakapan yang dikirim ulang.
  */
 class EngineFlow(
-    private val llm: Llm,
+    llmRaw: Llm,
     private val store: FileStore,
     private val log: EventLog,
     initial: FlowState = FlowState(),
     private val onState: (FlowState) -> Unit = {},
     private val maxCalls: Int = 30,
-    private val clock: () -> Long = { System.currentTimeMillis() }
+    private val clock: () -> Long = { System.currentTimeMillis() },
+    private val sandbox: Sandbox? = null
 ) {
+    private val llm = CountingLlm(llmRaw)
+
     var state: FlowState = initial
         private set
 
     private fun set(s: FlowState) { state = s; onState(s) }
 
     companion object {
+        const val MAX_DEBUG_ROUNDS = 2
+
         private val APPROVE = setOf("ya", "y", "ok", "oke", "setuju", "lanjut", "lanjutkan", "mulai", "gas", "siap", "betul", "sesuai", "yes")
 
         fun isApproval(text: String): Boolean =
@@ -57,7 +65,7 @@ class EngineFlow(
             return "sekitar $n sampai ${n + n / 2 + 1} panggilan"
         }
 
-        fun describe(spec: AppSpec, maxCalls: Int): String {
+        fun describe(spec: AppSpec, maxCalls: Int, plan: TestPlan? = null): String {
             val sb = StringBuilder()
             sb.append("**").append(spec.name).append("** (").append(spec.kind).append(")\n\nFitur:\n")
             spec.features.forEach { f ->
@@ -74,6 +82,10 @@ class EngineFlow(
             if (spec.decisions.isNotEmpty()) {
                 sb.append("\nKeputusan desain:\n"); spec.decisions.forEach { sb.append("- ").append(it).append('\n') }
             }
+            if (plan != null && plan.checks.isNotEmpty()) {
+                val v = plan.checks.count { it.verified }
+                sb.append("\nTes otomatis: ").append(plan.checks.size).append(" (").append(v).append(" dengan nilai acuan terverifikasi). Setelah disetujui, tes dan blueprint tidak diubah agent.\n")
+            }
             sb.append("\nAnggaran: ").append(estimate(spec)).append(" (batas $maxCalls).\n")
             sb.append("Ketik **setuju** untuk mulai, atau tulis revisi.")
             return sb.toString()
@@ -81,6 +93,23 @@ class EngineFlow(
     }
 
     suspend fun handle(text: String, onProgress: suspend (String) -> Unit = {}): List<Say> {
+        val calls0 = llm.calls
+        val tokens0 = llm.tokens
+        try {
+            val says = dispatch(text, onProgress).toMutableList()
+            if (state.stage == Stage.DONE && says.lastOrNull()?.who == "TIKET") {
+                val c = state.calls + (llm.calls - calls0)
+                val k = state.tokens + (llm.tokens - tokens0)
+                says += Say("SYSTEM", "Ukuran pekerjaan: $c panggilan LLM, sekitar $k token (perkiraan).")
+            }
+            return says
+        } finally {
+            val dc = llm.calls - calls0
+            if (dc > 0) set(state.copy(calls = state.calls + dc, tokens = state.tokens + (llm.tokens - tokens0)))
+        }
+    }
+
+    private suspend fun dispatch(text: String, onProgress: suspend (String) -> Unit): List<Say> {
         val t = text.trim()
         if (t.isEmpty()) return emptyList()
         return when (state.stage) {
@@ -157,8 +186,8 @@ class EngineFlow(
                     )
                 )
             } else {
-                set(state.copy(stage = Stage.REVIEW, brief = brief, specJson = SpecJson.write(r.spec), pending = emptyList()))
-                listOf(Say("BLUEPRINT", describe(r.spec, maxCalls)))
+                set(state.copy(stage = Stage.REVIEW, brief = brief, specJson = SpecJson.write(r.spec), planJson = r.plan?.let { PlanParser.write(it) } ?: "", pending = emptyList()))
+                listOf(Say("BLUEPRINT", describe(r.spec, maxCalls, r.plan)))
             }
             is BlueprintResult.Failed -> {
                 set(state.copy(stage = Stage.IDLE, brief = brief))
@@ -186,7 +215,8 @@ class EngineFlow(
             store.all().keys.filter { it !in keep }.forEach { store.delete(it) }
             set(state.copy(stage = Stage.RUNNING))
         }
-        val report = TicketRunner(llm, store, log, maxCalls, clock = clock).run(spec, onProgress)
+        val runner = TicketRunner(llm, store, log, maxCalls, clock = clock)
+        val report = runner.run(spec, onProgress)
         val out = mutableListOf<Say>()
         return when {
             report.stopped != null -> {
@@ -201,12 +231,66 @@ class EngineFlow(
                 )
                 out
             }
-            else -> {
-                set(state.copy(stage = Stage.DONE))
-                store.write("PROJECT.md", ProjectNotes.render(spec))
-                out += Say("TIKET", "Selesai: ${report.passed.size} file dibuat dengan ${report.calls} panggilan. Buka tab Preview untuk mencobanya.")
-                out
-            }
+            else -> verifyAndFinish(spec, runner, report.calls, report.passed.size, onProgress)
         }
     }
+
+    /** Uji di sandbox; hanya bug kode yang diserahkan ke Debugger (maks [MAX_DEBUG_ROUNDS] putaran). */
+    private suspend fun verifyAndFinish(
+        spec: AppSpec, runner: TicketRunner, startCalls: Int, fileCount: Int, onProgress: suspend (String) -> Unit
+    ): List<Say> {
+        val plan = (PlanParser.parse(state.planJson) as? PlanResult.Ok)?.plan ?: TestPlan(emptyList())
+        var calls = startCalls
+        var warnings: List<Failure> = emptyList()
+        var tested = false
+        if (sandbox != null) {
+            var round = 0
+            while (true) {
+                onProgress("menguji halaman di sandbox")
+                val report = try {
+                    sandbox.run(plan)
+                } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    SandboxReport(false, emptyList(), emptyList(), "sandbox gagal dijalankan: ${e.message}")
+                }
+                val failures = Triage.classify(report, plan)
+                if (failures.isEmpty()) {
+                    log.append(Event(Event.SANDBOX_PASSED, null, "${report.results.size} pemeriksaan", calls, clock()))
+                    tested = true
+                    break
+                }
+                log.append(Event(Event.SANDBOX_FAILED, null, failures.first().message.take(200), calls, clock()))
+                val fixable = Triage.forDebugger(failures)
+                if (fixable.isEmpty()) { warnings = failures; break }
+                if (round >= MAX_DEBUG_ROUNDS) return stuck(failures, round)
+                round++
+                var fixedAny = false
+                for (f in Implicated.files(fixable, plan, spec)) {
+                    onProgress("Debugger memperbaiki $f ($round/$MAX_DEBUG_ROUNDS)")
+                    val r = runner.repair(spec, f, fixable.map { it.message }, calls)
+                    calls = r.calls
+                    if (r.ok) fixedAny = true
+                }
+                if (!fixedAny) return stuck(failures, round)
+            }
+        }
+        set(state.copy(stage = Stage.DONE))
+        store.write("PROJECT.md", ProjectNotes.render(spec))
+        val sb = StringBuilder("Selesai: $fileCount file dibuat dengan $calls panggilan.")
+        if (tested) sb.append(" Lolos uji otomatis di sandbox.")
+        if (warnings.isNotEmpty()) {
+            sb.append("\n\nUji belum sepenuhnya meyakinkan; bukan bug kode, jadi butuh keputusanmu:\n").append(Triage.render(warnings))
+        }
+        sb.append("\nFile tersimpan di folder project (tab Files).")
+        return listOf(Say("TIKET", sb.toString()))
+    }
+
+    private fun stuck(failures: List<Failure>, rounds: Int): List<Say> = listOf(
+        Say(
+            "TIKET",
+            "Kode sudah dibuat tapi belum lolos uji (Debugger sudah mencoba $rounds kali):\n" + Triage.render(failures.take(6)) +
+                "\nPenggunaan kuota dihentikan di sini. Ketik **lanjut** untuk mencoba lagi, atau tulis revisi."
+        )
+    )
 }

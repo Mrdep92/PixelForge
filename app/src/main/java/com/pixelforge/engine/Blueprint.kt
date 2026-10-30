@@ -1,7 +1,7 @@
 package com.pixelforge.engine
 
 sealed class BlueprintResult {
-    data class Ok(val spec: AppSpec, val calls: Int) : BlueprintResult()
+    data class Ok(val spec: AppSpec, val calls: Int, val plan: TestPlan? = null) : BlueprintResult()
     data class Failed(val problems: List<String>, val calls: Int) : BlueprintResult()
 }
 
@@ -14,14 +14,21 @@ object Blueprint {
             " \"features\":[{\"id\":\"F1\",\"title\":\"...\",\"accept\":[\"observable criterion\", ...]}],\n" +
             " \"files\":[{\"path\":\"index.html\",\"features\":[\"F1\"],\"uses\":[\"js/app.js\"],\"exports\":[],\"cards\":[]},\n" +
             "           {\"path\":\"js/app.js\",\"features\":[\"F1\"],\"uses\":[],\"exports\":[\"functionName(arg1, arg2)\"],\"cards\":[\"prayer-times\"]}],\n" +
-            " \"facts\":[], \"decisions\":[\"short design decision\"]}\n" +
+            " \"facts\":[], \"decisions\":[\"short design decision\"],\n" +
+            " \"tests\":[{\"kind\":\"exists\",\"label\":\"title shown\",\"selector\":\"h1\"},\n" +
+            "          {\"kind\":\"text\",\"label\":\"...\",\"selector\":\"#out\",\"text\":\"...\"},\n" +
+            "          {\"kind\":\"call\",\"label\":\"...\",\"fn\":\"functionName\",\"args\":[1,2],\"expect\":3,\"tolerance\":0,\"verified\":false}]}\n" +
             "Rules:\n" +
             "- Plain HTML, CSS, JavaScript only. kind is \"pwa\" (or \"web\"). index.html is required and is the entry point.\n" +
             "- At most ${SpecValidator.MAX_FILES} files, as few as possible. Allowed extensions: html, js, css, json, svg, webmanifest, txt.\n" +
             "- Every feature needs 1-3 acceptance criteria that can be observed in the running page (an element is visible, no console error, a value is shown).\n" +
             "- \"uses\" lists the files a file depends on; no cycles. \"exports\" lists exact function signatures other files may call.\n" +
             "- \"cards\" lists knowledge card ids a file needs, taken ONLY from the catalog given. Never invent card ids. If a needed fact has no card, say so in decisions.\n" +
-            "- No external libraries or CDNs.\n"
+            "- No external libraries or CDNs.\n" +
+            "- \"tests\": 3-10 automatic checks derived from the acceptance criteria. kind is exists, text or call. A call test may only use a function listed in some file's exports.\n" +
+            "- Set \"verified\":true ONLY when the expected value comes from a KNOWLEDGE CARD or the brief. Never guess expected values; if unsure, use an exists/text test instead.\n"
+
+    private fun hasTests(reply: String): Boolean = Regex("\"tests\"\\s*:").containsMatchIn(reply)
 
     fun user(brief: String): String =
         "BRIEF:\n$brief\nKNOWLEDGE CARD CATALOG:\n${Cards.catalog()}\n"
@@ -39,7 +46,17 @@ object Blueprint {
                 is SpecResult.Err -> problems = listOf(r.message)
                 is SpecResult.Ok -> {
                     problems = SpecValidator.validate(r.spec)
-                    if (problems.isEmpty()) return BlueprintResult.Ok(r.spec, calls)
+                    var plan: TestPlan? = null
+                    if (problems.isEmpty() && hasTests(reply)) {
+                        when (val p = PlanParser.parse(reply)) {
+                            is PlanResult.Err -> problems = listOf("tests: " + p.message)
+                            is PlanResult.Ok -> {
+                                problems = PlanValidator.validate(p.plan, r.spec).map { "tests: $it" }
+                                plan = p.plan
+                            }
+                        }
+                    }
+                    if (problems.isEmpty()) return BlueprintResult.Ok(r.spec, calls, plan)
                 }
             }
             if (attempt == maxRepairs) break

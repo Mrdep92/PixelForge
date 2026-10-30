@@ -23,7 +23,7 @@ import kotlin.coroutines.resume
  * Sandbox: WebView tersembunyi (tidak ditampilkan). File project disajikan dari penyimpanan aplikasi,
  * semua permintaan ke luar (internet) diblokir dan dicatat sebagai galat, lalu skrip uji dijalankan.
  */
-class SandboxRunner(private val context: Context, private val readFile: (String) -> String?) {
+class SandboxRunner(private val context: Context, private val readFile: (String) -> String?) : Sandbox {
 
     companion object {
         const val HOST = "pixelforge.local"
@@ -43,7 +43,7 @@ class SandboxRunner(private val context: Context, private val readFile: (String)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
-    suspend fun run(plan: TestPlan, timeoutMs: Long = 10_000): SandboxReport = withContext(Dispatchers.Main) {
+    override suspend fun run(plan: TestPlan, timeoutMs: Long): SandboxReport = withContext(Dispatchers.Main) {
         val errors = Collections.synchronizedList(mutableListOf<String>())
         val script = SandboxScript.build(plan)
         var view: WebView? = null

@@ -150,9 +150,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _engineOn.value = on
     }
 
-    /** Isi file project untuk tab Preview. */
-    fun readProjectFile(path: String): String? = workspace.takeIf { it.exists(path) }?.read(path)
-
     private suspend fun runEngine(text: String, providers: List<Provider>) {
         val pid = _projectId.value
         _busy.value = true
@@ -166,6 +163,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 onState = {
                     com.pixelforge.engine.FlowStateStore.save(stateStore, pid, it)
                     if (pid == _projectId.value) _stage.value = it.stage
+                },
+                sandbox = com.pixelforge.engine.SandboxRunner(getApplication<Application>()) { path ->
+                    wsFor(pid).takeIf { it.exists(path) }?.read(path)
                 }
             )
             val says = flow.handle(text) { _progress.value = it }

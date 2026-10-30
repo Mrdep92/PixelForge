@@ -2,6 +2,11 @@ package com.pixelforge.engine
 
 import com.google.gson.JsonParser
 
+/** Penguji halaman. Implementasi nyata memakai WebView tersembunyi; tes memakai tiruan. */
+interface Sandbox {
+    suspend fun run(plan: TestPlan, timeoutMs: Long = 10_000): SandboxReport
+}
+
 data class CheckResult(val label: String, val ok: Boolean, val detail: String)
 
 /** Hasil satu kali uji di sandbox. [harnessError] diisi bila alat ujinya sendiri bermasalah (bukan kode aplikasi). */

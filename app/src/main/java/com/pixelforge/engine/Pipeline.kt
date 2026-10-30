@@ -118,6 +118,38 @@ class TicketRunner(
         return RunReport(passed, failed, calls, null)
     }
 
+    class RepairResult(val ok: Boolean, val calls: Int, val reason: String)
+
+    /** Satu percobaan perbaikan untuk satu file berdasarkan laporan uji (Debugger). Hasil melewati pemeriksaan yang sama dengan tiket. */
+    suspend fun repair(spec: AppSpec, file: String, problems: List<String>, startCalls: Int): RepairResult {
+        val t = TicketPlanner.plan(spec).firstOrNull { it.file == file }
+            ?: return RepairResult(false, startCalls, "$file tidak ada di blueprint")
+        if (startCalls >= maxCalls) return RepairResult(false, startCalls, "anggaran habis")
+        val existing = store.read(file)
+        val outlines = t.uses.mapNotNull { u -> store.read(u)?.let { u to Outline.of(u, it) } }.toMap()
+        val reply = try {
+            llm.call(Packet.SYSTEM, Packet.user(t, spec.lang, existing, outlines, problems))
+        } catch (e: Exception) {
+            log.append(Event(Event.PAUSED, t.id, e.message?.take(200), startCalls, clock()))
+            throw e
+        }
+        val calls = startCalls + 1
+        val outcome = interpret(t, reply, existing)
+        val content = outcome.content
+        if (content == null) {
+            log.append(Event(Event.REPAIR_FAILED, t.id, outcome.problems.firstOrNull(), calls, clock()))
+            return RepairResult(false, calls, outcome.problems.firstOrNull() ?: "balasan tidak terbaca")
+        }
+        val found = outcome.problems + Checks.all(t, content, store.all() + (file to content), spec.files.map { it.path })
+        if (found.isNotEmpty()) {
+            log.append(Event(Event.REPAIR_FAILED, t.id, found.first(), calls, clock()))
+            return RepairResult(false, calls, found.first())
+        }
+        store.write(file, content)
+        log.append(Event(Event.REPAIRED, t.id, file, calls, clock()))
+        return RepairResult(true, calls, "")
+    }
+
     private class Outcome(val content: String?, val problems: List<String>)
 
     /** Ubah balasan model menjadi isi file kandidat, atau daftar masalah bila tidak bisa. */

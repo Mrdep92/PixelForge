@@ -19,6 +19,10 @@ data class Event(
         const val TICKET_SKIPPED = "TICKET_SKIPPED"
         const val PAUSED = "PAUSED"
         const val BUDGET_STOPPED = "BUDGET_STOPPED"
+        const val SANDBOX_PASSED = "SANDBOX_PASSED"
+        const val SANDBOX_FAILED = "SANDBOX_FAILED"
+        const val REPAIRED = "REPAIRED"
+        const val REPAIR_FAILED = "REPAIR_FAILED"
     }
 }
 

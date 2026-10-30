@@ -44,7 +44,7 @@ object PlanParser {
         } catch (e: Exception) {
             return PlanResult.Err("Rencana tes bukan JSON valid: ${e.message?.take(80)}")
         }
-        val arr = root.get("checks")?.takeIf { it.isJsonArray }?.asJsonArray
+        val arr = (root.get("checks") ?: root.get("tests"))?.takeIf { it.isJsonArray }?.asJsonArray
             ?: return PlanResult.Err("Rencana tes tidak punya daftar 'checks'.")
         val checks = mutableListOf<Check>()
         for ((i, el) in arr.withIndex()) {
