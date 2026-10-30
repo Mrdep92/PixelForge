@@ -150,6 +150,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _engineOn.value = on
     }
 
+    /** Dev: kirim hasil ke repo project dan aktifkan GitHub Pages supaya aplikasi punya alamat web. */
+    fun publishWeb() {
+        if (_busy.value) return
+        val pid = _projectId.value
+        viewModelScope.launch {
+            val token = store.ghToken
+            val repo = _meta.value.repo
+            val branch = _meta.value.branch
+            if (token.isBlank() || repo.isBlank()) {
+                post("SYSTEM", "system", "ℹ Atur repo lewat tombol Repo di atas dan isi token GitHub di Settings dulu.", null, pid)
+                return@launch
+            }
+            val files = wsFor(pid).readAll()
+            if ("index.html" !in files) {
+                post("SYSTEM", "system", "ℹ Belum ada index.html untuk dikirim.", null, pid)
+                return@launch
+            }
+            _busy.value = true
+            post("SYSTEM", "system", "⬆ Mengirim ${files.size} file ke $repo ...", null, pid)
+            val gh = GitHubClient(token, repo, branch)
+            try {
+                gh.commitFiles(files, "PixelForge: " + projectName())
+                val url = gh.enablePages() ?: ("https://" + repo.substringBefore('/') + ".github.io/" + repo.substringAfter('/') + "/")
+                post("SYSTEM", "system", "✅ Terkirim ke $repo. Alamat aplikasi (aktif sekitar 1–2 menit): $url", null, pid)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                post("SYSTEM", "system", "⚠ ${e.message}", null, pid)
+            } finally {
+                gh.close()
+                _busy.value = false
+            }
+        }
+    }
+
     /** Isi file project untuk penampil aplikasi. */
     fun readProjectFile(path: String): String? = workspace.takeIf { it.exists(path) }?.read(path)
 

@@ -190,6 +190,19 @@ class GitHubClient(private val token: String, repo: String, private val branch: 
         return commit
     }
 
+    /** Aktifkan GitHub Pages dari branch ini (folder root). Return alamat situs bila diketahui. */
+    suspend fun enablePages(): String? {
+        val body = JsonObject().apply {
+            add("source", JsonObject().apply { addProperty("branch", branch); addProperty("path", "/") })
+        }
+        val r = call(HttpMethod.Post, "/pages", body)
+        if (r.code !in 200..299 && r.code != 409) {
+            throw GitHubException("Gagal mengaktifkan Pages → HTTP ${r.code}: ${msgOf(r.body)}")
+        }
+        val g = call(HttpMethod.Get, "/pages")
+        return if (g.code in 200..299) runCatching { com.google.gson.JsonParser.parseString(g.body).asJsonObject.get("html_url")?.asString }.getOrNull() else null
+    }
+
     /** Tunggu workflow untuk commit ini selesai. Null kalau repo tidak punya workflow. */
     suspend fun waitForRun(sha: String): CiRun? {
         val start = System.currentTimeMillis()

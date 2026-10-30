@@ -174,13 +174,20 @@ fun ChatScreen(vm: MainViewModel) {
         }
 
         if (engineOn && "index.html" in files && !busy) {
-            Button(
-                onClick = {
-                    locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853))
-            ) { Text("▶ Jalankan aplikasi") }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853))
+                ) { Text("▶ Jalankan") }
+                Button(
+                    onClick = { vm.publishWeb() },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C4DFF))
+                ) { Text("⬆ Terbitkan") }
+            }
         }
         if (viewer) AppViewer(readFile = { vm.readProjectFile(it) }, onClose = { viewer = false })
 
