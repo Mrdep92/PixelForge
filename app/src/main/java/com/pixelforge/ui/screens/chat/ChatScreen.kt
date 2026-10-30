@@ -1,5 +1,8 @@
 package com.pixelforge.ui.screens.chat
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
@@ -38,6 +41,10 @@ fun ChatScreen(vm: MainViewModel) {
     val uriHandler = LocalUriHandler.current
     var confirmClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val files by vm.files.collectAsStateWithLifecycle()
+    val engineOn by vm.engineOn.collectAsStateWithLifecycle()
+    var viewer by remember { mutableStateOf(false) }
+    val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { viewer = true }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
@@ -69,7 +76,6 @@ fun ChatScreen(vm: MainViewModel) {
                 )
             ) { Text("🗑 Bersihkan") }
         }
-        val engineOn by vm.engineOn.collectAsStateWithLifecycle()
         val stage by vm.stage.collectAsStateWithLifecycle()
         val progress by vm.progress.collectAsStateWithLifecycle()
         if (engineOn) StageStrip(stage, progress) else TeamStrip(agents)
@@ -166,6 +172,17 @@ fun ChatScreen(vm: MainViewModel) {
                 dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Batal") } }
             )
         }
+
+        if (engineOn && "index.html" in files && !busy) {
+            Button(
+                onClick = {
+                    locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853))
+            ) { Text("▶ Jalankan aplikasi") }
+        }
+        if (viewer) AppViewer(readFile = { vm.readProjectFile(it) }, onClose = { viewer = false })
 
         Row(modifier = Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(

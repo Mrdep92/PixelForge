@@ -2,6 +2,8 @@ package com.pixelforge.engine
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -47,6 +49,7 @@ class SandboxRunner(private val context: Context, private val readFile: (String)
         val errors = Collections.synchronizedList(mutableListOf<String>())
         val script = SandboxScript.build(plan)
         var view: WebView? = null
+        var pageLoaded = false
         try {
             withTimeout(timeoutMs) {
                 suspendCancellableCoroutine<SandboxReport> { cont ->
@@ -57,6 +60,7 @@ class SandboxRunner(private val context: Context, private val readFile: (String)
                     wv.settings.allowFileAccess = false
                     wv.settings.allowContentAccess = false
                     var started = false
+                    val main = Handler(Looper.getMainLooper())
                     wv.webChromeClient = object : WebChromeClient() {
                         override fun onConsoleMessage(m: ConsoleMessage): Boolean {
                             if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
@@ -88,7 +92,8 @@ class SandboxRunner(private val context: Context, private val readFile: (String)
                         override fun onPageFinished(v: WebView, url: String?) {
                             if (started) return
                             started = true
-                            v.postDelayed({
+                            pageLoaded = true
+                            main.postDelayed({
                                 v.evaluateJavascript(script) { raw ->
                                     val inner = runCatching { Gson().fromJson(raw, String::class.java) }.getOrNull()
                                     val results = inner?.let { SandboxReports.parseResults(it) }
@@ -110,7 +115,8 @@ class SandboxRunner(private val context: Context, private val readFile: (String)
                 }
             }
         } catch (e: TimeoutCancellationException) {
-            SandboxReport(false, synchronized(errors) { errors.toList() }, emptyList(), "waktu uji habis (${timeoutMs / 1000} dtk): kode kemungkinan berputar tanpa akhir")
+            SandboxReport(false, synchronized(errors) { errors.toList() }, emptyList(), if (pageLoaded) "waktu uji habis (${timeoutMs / 1000} dtk): halaman termuat tapi skrip uji tidak selesai; kode mungkin berputar tanpa akhir"
+                else "waktu uji habis (${timeoutMs / 1000} dtk): halaman tidak selesai dimuat")
         } finally {
             view?.destroy()
         }

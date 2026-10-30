@@ -150,6 +150,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _engineOn.value = on
     }
 
+    /** Isi file project untuk penampil aplikasi. */
+    fun readProjectFile(path: String): String? = workspace.takeIf { it.exists(path) }?.read(path)
+
     private suspend fun runEngine(text: String, providers: List<Provider>) {
         val pid = _projectId.value
         _busy.value = true
