@@ -189,7 +189,7 @@ fun ChatScreen(vm: MainViewModel) {
                 ) { Text("⬆ Terbitkan") }
             }
         }
-        if (viewer) AppViewer(readFile = { vm.readProjectFile(it) }, onClose = { viewer = false })
+        if (viewer) AppViewer(readFile = { vm.readProjectFile(it) }, onFixErrors = { vm.fixFromViewer(it) }, onClose = { viewer = false })
 
         Row(modifier = Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(

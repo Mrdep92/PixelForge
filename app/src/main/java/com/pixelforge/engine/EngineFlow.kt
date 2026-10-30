@@ -109,6 +109,29 @@ class EngineFlow(
         }
     }
 
+    /** Galat dari penampil aplikasi → Debugger memperbaiki file yang terlibat (satu putaran, maks 3 file). */
+    suspend fun fixReported(errors: List<String>, onProgress: suspend (String) -> Unit = {}): List<Say> {
+        val spec = (SpecParser.parse(state.specJson) as? SpecResult.Ok)?.spec
+            ?: return listOf(Say("SYSTEM", "Belum ada blueprint yang tersimpan untuk diperbaiki."))
+        val plan = (PlanParser.parse(state.planJson) as? PlanResult.Ok)?.plan ?: TestPlan(emptyList())
+        val failures = errors.take(6).map { Failure(FailureKind.CODE_BUG, "Galat konsol: ${it.take(300)}") }
+        val files = Implicated.files(failures, plan, spec)
+        val runner = TicketRunner(llm, store, log, maxCalls, clock = clock)
+        var calls = 0
+        val fixed = mutableListOf<String>()
+        var lastReason = ""
+        for (f in files) {
+            onProgress("Debugger memperbaiki $f")
+            val r = runner.repair(spec, f, failures.map { it.message }, calls)
+            calls = r.calls
+            if (r.ok) fixed += f else lastReason = r.reason
+        }
+        val text = if (fixed.isEmpty()) "Debugger belum berhasil memperbaiki (${lastReason.ifBlank { "tidak ada file terkait" }}). Kirim tangkapan layar galatnya padaku."
+        else "Diperbaiki: ${fixed.joinToString()}. Buka lagi aplikasinya (Jalankan) untuk mencoba."
+        val c0 = llm.calls
+        return listOf(Say("TIKET", text), Say("SYSTEM", "Debugger memakai $c0 panggilan LLM."))
+    }
+
     private suspend fun dispatch(text: String, onProgress: suspend (String) -> Unit): List<Say> {
         val t = text.trim()
         if (t.isEmpty()) return emptyList()

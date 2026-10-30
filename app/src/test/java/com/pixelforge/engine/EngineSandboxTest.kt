@@ -142,6 +142,19 @@ class EngineSandboxTest {
         assertEquals(Stage.REVIEW, f.state.stage)
     }
 
+    @Test fun reportedViewerErrorsGoToDebuggerForTheRightFile() = runBlocking {
+        val llm = SandboxScriptedLlm(listOf(ready, spec, js, html, jsFixed))
+        val (f, store, _) = flow(llm, FakeSandbox(listOf(ok)))
+        toRunning(f)
+        f.handle("setuju")
+        val before = llm.users.size
+        val says = f.fixReported(listOf("ReferenceError: foo is not defined (a.js:1)"))
+        assertEquals(before + 1, llm.users.size)                       // satu panggilan perbaikan
+        assertTrue(llm.users.last().contains("foo is not defined") && llm.users.last().contains("js/a.js"))
+        assertTrue(says[0].text.contains("Diperbaiki: js/a.js"))
+        assertTrue(store.files["js/a.js"]!!.contains("x + 0"))
+    }
+
     @Test fun implicatedFilesFollowFailures() {
         val s = (SpecParser.parse(spec) as SpecResult.Ok).spec
         val plan = (PlanParser.parse(spec) as PlanResult.Ok).plan

@@ -188,25 +188,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Isi file project untuk penampil aplikasi. */
     fun readProjectFile(path: String): String? = workspace.takeIf { it.exists(path) }?.read(path)
 
-    private suspend fun runEngine(text: String, providers: List<Provider>) {
+    private fun newFlow(pid: String, router: LlmRouter) = com.pixelforge.engine.EngineFlow(
+        com.pixelforge.engine.RouterLlm(router),
+        com.pixelforge.engine.WorkspaceStore(wsFor(pid)),
+        com.pixelforge.engine.PersistentEventLog(stateStore, "events:$pid"),
+        com.pixelforge.engine.FlowStateStore.load(stateStore, pid),
+        onState = {
+            com.pixelforge.engine.FlowStateStore.save(stateStore, pid, it)
+            if (pid == _projectId.value) _stage.value = it.stage
+        },
+        sandbox = com.pixelforge.engine.SandboxRunner(getApplication<Application>()) { path ->
+            wsFor(pid).takeIf { it.exists(path) }?.read(path)
+        }
+    )
+
+    /** Galat yang terlihat saat aplikasi dijalankan diserahkan ke Debugger (satu putaran). */
+    fun fixFromViewer(errors: List<String>) {
+        if (_busy.value || errors.isEmpty()) return
+        viewModelScope.launch {
+            val providers = allowedProviders { fixFromViewer(errors) }
+            if (providers.isEmpty()) return@launch
+            runEngine("", providers) { flow, onProgress -> flow.fixReported(errors, onProgress) }
+        }
+    }
+
+    private suspend fun runEngine(
+        text: String,
+        providers: List<Provider>,
+        action: (suspend (com.pixelforge.engine.EngineFlow, suspend (String) -> Unit) -> List<com.pixelforge.engine.Say>)? = null
+    ) {
         val pid = _projectId.value
         _busy.value = true
         val router = LlmRouter(providers, quotaMeter)
         try {
-            val flow = com.pixelforge.engine.EngineFlow(
-                com.pixelforge.engine.RouterLlm(router),
-                com.pixelforge.engine.WorkspaceStore(wsFor(pid)),
-                com.pixelforge.engine.PersistentEventLog(stateStore, "events:$pid"),
-                com.pixelforge.engine.FlowStateStore.load(stateStore, pid),
-                onState = {
-                    com.pixelforge.engine.FlowStateStore.save(stateStore, pid, it)
-                    if (pid == _projectId.value) _stage.value = it.stage
-                },
-                sandbox = com.pixelforge.engine.SandboxRunner(getApplication<Application>()) { path ->
-                    wsFor(pid).takeIf { it.exists(path) }?.read(path)
-                }
-            )
-            val says = flow.handle(text) { _progress.value = it }
+            val flow = newFlow(pid, router)
+            val says = if (action != null) action(flow) { _progress.value = it } else flow.handle(text) { _progress.value = it }
             says.forEach { post("AGENT", "assistant", it.text, it.who, pid) }
         } catch (e: CancellationException) {
             throw e

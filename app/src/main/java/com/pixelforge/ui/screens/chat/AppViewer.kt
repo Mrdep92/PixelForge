@@ -37,11 +37,11 @@ private fun mimeOf(path: String): String = when (path.substringAfterLast('.', ""
 /** Menjalankan aplikasi hasil buatan layar penuh. File dibaca dari folder project; hanya alamat lokal yang dilayani. */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun AppViewer(readFile: (String) -> String?, onClose: () -> Unit) {
+fun AppViewer(readFile: (String) -> String?, onFixErrors: (List<String>) -> Unit, onClose: () -> Unit) {
     val errors = remember { mutableStateListOf<String>() }
     var reload by remember { mutableIntStateOf(0) }
     Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnBackPress = true)) {
-        Column(Modifier.fillMaxSize().background(Color(0xFF1A1A2E)).statusBarsPadding()) {
+        Column(Modifier.fillMaxSize().background(Color(0xFF1A1A2E)).statusBarsPadding().navigationBarsPadding()) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Aplikasi", color = Color(0xFF00E5FF), fontSize = 18.sp, modifier = Modifier.weight(1f).padding(12.dp))
                 TextButton(onClick = { errors.clear(); reload++ }) { Text("Muat ulang", color = Color(0xFF00E5FF)) }
@@ -85,9 +85,10 @@ fun AppViewer(readFile: (String) -> String?, onClose: () -> Unit) {
                 )
             }
             if (errors.isNotEmpty()) {
-                Column(Modifier.fillMaxWidth().heightIn(max = 100.dp).background(Color(0xFF3B1F1F)).padding(8.dp)) {
-                    Text("Galat konsol:", color = Color(0xFFFF8A80), fontSize = 12.sp)
-                    errors.take(4).forEach { Text(it, color = Color.White, fontSize = 11.sp) }
+                Column(Modifier.fillMaxWidth().background(Color(0xFF3B1F1F)).padding(8.dp)) {
+                    Text("Galat konsol (${errors.size}):", color = Color(0xFFFF8A80), fontSize = 12.sp)
+                    errors.take(3).forEach { Text(it.take(160), color = Color.White, fontSize = 11.sp) }
+                    TextButton(onClick = { onFixErrors(errors.toList()); onClose() }) { Text("🔧 Minta Debugger memperbaiki", color = Color(0xFF69F0AE)) }
                 }
             }
         }
