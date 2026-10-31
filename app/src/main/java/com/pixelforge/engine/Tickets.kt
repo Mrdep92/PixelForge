@@ -46,7 +46,7 @@ object TicketPlanner {
             }
             val own = if (f.path == "index.html") spec.dom.map { it.id } else emptyList()
             val fill = spec.dom.filter { it.by == f.path }.map { it.id }
-            Ticket("T${i + 1}", f.path, f.uses, goal, accept, interfaces, Cards.factsFor(f.cards) + spec.facts, f.exports, own, fill)
+            Ticket("T${i + 1}", f.path, f.uses, goal, accept, interfaces, Cards.factsFor(f.cards) + spec.facts + (if (f.path.endsWith(".js")) Assets.factsFor(spec.assets) else emptyList()), f.exports, own, fill)
         }
     }
 }

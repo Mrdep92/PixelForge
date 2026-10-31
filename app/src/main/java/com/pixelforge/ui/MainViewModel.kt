@@ -199,6 +199,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         },
         sandbox = com.pixelforge.engine.SandboxRunner(getApplication<Application>()) { path ->
             wsFor(pid).takeIf { it.exists(path) }?.read(path)
+        },
+        assetSource = { name ->
+            runCatching { getApplication<Application>().assets.open(name).bufferedReader(Charsets.UTF_8).use { it.readText() } }.getOrNull()
         }
     )
 

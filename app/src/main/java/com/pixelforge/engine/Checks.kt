@@ -15,7 +15,13 @@ object Checks {
 
     /** Semua pengecekan untuk file hasil tiket. [files] = isi semua file proyek (termasuk kandidat ini). */
     fun all(ticket: Ticket, content: String, files: Map<String, String>, specPaths: Collection<String>): List<String> =
-        leftovers(content) + syntax(ticket.file, content) + references(ticket, content, files, specPaths)
+        leftovers(content) + syntax(ticket.file, content) + arabic(content) + references(ticket, content, files, specPaths)
+
+    private val ARABIC = Regex("[\\u0600-\\u06FF\\u0750-\\u077F\\uFB50-\\uFDFF\\uFE70-\\uFEFF]")
+
+    /** Teks Arab (Al-Quran, doa) tidak boleh ditulis model: harus dari asset terverifikasi. */
+    fun arabic(content: String): List<String> =
+        if (ARABIC.containsMatchIn(content)) listOf("Ada teks Arab yang ditulis langsung di kode. Hapus; teks Arab hanya boleh dibaca dari berkas asset yang tersedia (lewat fetch), tidak boleh diketik.") else emptyList()
 
     /** Sisa penanda format yang bocor dari balasan model. */
     fun leftovers(content: String): List<String> {

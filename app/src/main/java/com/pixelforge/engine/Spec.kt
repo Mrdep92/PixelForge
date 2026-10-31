@@ -26,10 +26,13 @@ data class AppSpec(
     val facts: List<String>,
     val decisions: List<String>,
     /** Kontrak DOM: elemen yang dimiliki index.html (kosong) dan file JS yang mengisinya. */
-    val dom: List<DomItem> = emptyList()
+    val dom: List<DomItem> = emptyList(),
+    /** Id berkas data terverifikasi dari [Assets] yang disalin kode ke project. */
+    val assets: List<String> = emptyList()
 )
 
-data class DomItem(val id: String, val by: String)
+/** [lazy] = elemen sengaja kosong saat halaman dimuat (baru terisi setelah pengguna beraksi). */
+data class DomItem(val id: String, val by: String, val lazy: Boolean = false)
 
 sealed class SpecResult {
     data class Ok(val spec: AppSpec) : SpecResult()
@@ -81,7 +84,10 @@ object SpecParser {
                 files = files,
                 facts = root.strList("facts"),
                 decisions = root.strList("decisions"),
-                dom = root.objList("dom").map { DomItem(it.str("id"), it.str("by")) }
+                dom = root.objList("dom").map {
+                    DomItem(it.str("id"), it.str("by"), it.get("lazy")?.takeIf { l -> l.isJsonPrimitive }?.asBoolean ?: false)
+                },
+                assets = root.strList("assets")
             )
         )
     }
@@ -131,6 +137,7 @@ object SpecValidator {
         domIds.filter { !Regex("^[A-Za-z][A-Za-z0-9_-]*$").matches(it) }.forEach { errors += "Id DOM tidak valid: '$it'." }
         domIds.groupBy { it }.filter { it.value.size > 1 }.keys.forEach { errors += "Id DOM ganda: $it." }
         spec.dom.filter { it.by.isNotBlank() && (it.by !in paths || !it.by.endsWith(".js")) }.forEach { errors += "Id DOM '${it.id}' diisi oleh file yang tidak ada/bukan .js: '${it.by}'." }
+        spec.assets.filter { !Assets.known(it) }.forEach { errors += "Asset tidak dikenal: $it." }
         val covered = spec.files.flatMap { it.features }.toSet()
         featureIds.filter { it.isNotBlank() && it !in covered }.forEach { errors += "Fitur $it tidak punya file." }
 
@@ -164,9 +171,10 @@ object SpecJson {
         })
         root.add("dom", com.google.gson.JsonArray().apply {
             spec.dom.forEach { d ->
-                add(com.google.gson.JsonObject().apply { addProperty("id", d.id); addProperty("by", d.by) })
+                add(com.google.gson.JsonObject().apply { addProperty("id", d.id); addProperty("by", d.by); if (d.lazy) addProperty("lazy", true) })
             }
         })
+        root.add("assets", arr(spec.assets))
         root.add("facts", arr(spec.facts))
         root.add("decisions", arr(spec.decisions))
         return root.toString()

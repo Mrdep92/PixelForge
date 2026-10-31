@@ -108,7 +108,7 @@ class SandboxRunner(private val context: Context, private val readFile: (String)
                                         )
                                     }
                                 }
-                            }, 300)
+                            }, 800)
                         }
                     }
                     wv.loadUrl(BASE + "index.html")

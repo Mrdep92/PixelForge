@@ -17,11 +17,23 @@ object Assemble {
         val links = LINK_HREF.findAll(html).map { norm(it.groupValues[1]) }.toSet()
         val missingJs = ordered.filter { it.endsWith(".js") && it != "sw.js" && it !in scripts }
         val missingCss = ordered.filter { it.endsWith(".css") && it !in links }
+        val needBase = BaseCss.PATH !in links
         var out = html
         if (missingCss.isNotEmpty()) {
             val tags = missingCss.joinToString("") { "<link rel=\"stylesheet\" href=\"$it\">\n" }
             val i = out.indexOf("</head>", ignoreCase = true)
             out = if (i >= 0) out.substring(0, i) + tags + out.substring(i) else tags + out
+        }
+        if (needBase) {
+            // base.css harus paling awal agar style.css buatan model bisa menimpanya.
+            val base = "<link rel=\"stylesheet\" href=\"${BaseCss.PATH}\">\n"
+            val firstLink = Regex("<link[^>]*stylesheet", RegexOption.IGNORE_CASE).find(out)?.range?.first
+            val head = out.indexOf("</head>", ignoreCase = true)
+            out = when {
+                firstLink != null -> out.substring(0, firstLink) + base + out.substring(firstLink)
+                head >= 0 -> out.substring(0, head) + base + out.substring(head)
+                else -> base + out
+            }
         }
         if (missingJs.isNotEmpty()) {
             val tags = missingJs.joinToString("") { "<script src=\"$it\"></script>\n" }
@@ -48,7 +60,12 @@ object AppChecks {
     fun verify(spec: AppSpec, files: Map<String, String>): List<Issue> {
         val out = mutableListOf<Issue>()
         val paths = spec.files.map { it.path }.toSet()
+        val known = paths + spec.assets.mapNotNull { Assets.get(it)?.file } + BaseCss.PATH
         val html = files["index.html"]
+
+        for ((path, text) in files) {
+            if (path in paths && Checks.arabic(text).isNotEmpty()) out += Issue(path, Checks.arabic(text).first())
+        }
 
         if (html != null) {
             for (m in INLINE_SCRIPT.findAll(html)) {
@@ -82,12 +99,12 @@ object AppChecks {
         for ((path, text) in files) {
             if (path !in paths || !(path.endsWith(".js") || path.endsWith(".html"))) continue
             val bad = LOCAL_REF.findAll(text).map { it.groupValues[1] }.filter { ref ->
-                ref.startsWith("/") || ref.removePrefix("./") !in paths
+                ref.startsWith("/") || ref.removePrefix("./") !in known
             }.distinct().take(4).toList()
             if (bad.isNotEmpty()) {
                 out += Issue(
                     path,
-                    "Acuan file yang tidak valid: ${bad.joinToString(", ")}. Pakai path relatif tanpa '/' di depan, dan hanya file yang ada: ${paths.take(12).joinToString(", ")}."
+                    "Acuan file yang tidak valid: ${bad.joinToString(", ")}. Pakai path relatif tanpa '/' di depan, dan hanya file yang ada: ${known.take(12).joinToString(", ")}."
                 )
             }
         }

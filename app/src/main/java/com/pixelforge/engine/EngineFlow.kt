@@ -39,7 +39,9 @@ class EngineFlow(
     private val onState: (FlowState) -> Unit = {},
     private val maxCalls: Int = 30,
     private val clock: () -> Long = { System.currentTimeMillis() },
-    private val sandbox: Sandbox? = null
+    private val sandbox: Sandbox? = null,
+    /** Membaca berkas asset aplikasi menurut nama resource; null bila tidak ada. */
+    private val assetSource: (String) -> String? = { null }
 ) {
     private val llm = CountingLlm(llmRaw)
 
@@ -238,6 +240,12 @@ class EngineFlow(
             // Mulai bersih: file sisa dari percobaan lama yang tidak ada di blueprint dihapus.
             // Run baru: semua sisa file lama dihapus, termasuk file yang namanya sama, karena akan dibuat ulang dari blueprint.
             store.all().keys.forEach { store.delete(it) }
+            store.write(BaseCss.PATH, BaseCss.TEXT)
+            for (id in spec.assets) {
+                val a = Assets.get(id) ?: continue
+                val text = assetSource(a.resource)
+                if (text != null) store.write(a.file, text)
+            }
             set(state.copy(stage = Stage.RUNNING))
         }
         val runner = TicketRunner(llm, store, log, maxCalls, clock = clock)

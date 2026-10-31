@@ -24,6 +24,7 @@ data class Check(
         const val EXISTS = "EXISTS"
         const val TEXT = "TEXT"
         const val CALL = "CALL"
+        const val NONEMPTY = "NONEMPTY"
     }
 }
 
@@ -105,7 +106,7 @@ object PlanValidator {
         for (c in plan.checks) {
             val who = "'${c.label}'"
             when (c.kind) {
-                Check.EXISTS -> if (c.selector.isBlank()) out += "$who: selector kosong."
+                Check.EXISTS, Check.NONEMPTY -> if (c.selector.isBlank()) out += "$who: selector kosong."
                 Check.TEXT -> {
                     if (c.selector.isBlank()) out += "$who: selector kosong."
                     if (c.text.isBlank()) out += "$who: teks kosong."

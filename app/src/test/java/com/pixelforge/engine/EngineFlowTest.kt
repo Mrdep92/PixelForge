@@ -43,7 +43,7 @@ class EngineFlowTest {
         val m3 = flow.handle("setuju")
         assertEquals(Stage.DONE, flow.state.stage)
         assertTrue(m3.any { it.text.contains("2 file") })
-        assertEquals(setOf("js/a.js", "index.html", "PROJECT.md"), store.files.keys)
+        assertEquals(setOf("js/a.js", "index.html", "PROJECT.md", "base.css"), store.files.keys)
         assertEquals(5, llm.users.size)                  // 2 wawancara + 1 blueprint + 2 tiket
     }
 

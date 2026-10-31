@@ -28,6 +28,10 @@ object SandboxScript {
       if (c.k === 'EXISTS') {
         var n = document.querySelectorAll(c.s).length;
         add(c.l, n > 0, n > 0 ? '' : 'tidak ada elemen ' + c.s);
+      } else if (c.k === 'NONEMPTY') {
+        var ne = document.querySelector(c.s);
+        var okN = !!ne && (((ne.textContent || '').trim().length > 0) || ne.children.length > 0 || ((ne.value || '').length > 0));
+        add(c.l, okN, okN ? '' : (ne ? 'elemen ' + c.s + ' kosong setelah halaman dimuat' : 'tidak ada elemen ' + c.s));
       } else if (c.k === 'TEXT') {
         var el = document.querySelector(c.s);
         var tx = el ? (el.textContent || '') : null;

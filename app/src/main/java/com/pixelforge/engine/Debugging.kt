@@ -30,7 +30,9 @@ object Implicated {
             val label = m.substringBefore(':')
             val check = byLabel[label]
             if (check != null) {
-                if (check.kind == Check.CALL) {
+                if (check.kind == Check.NONEMPTY) {
+                    spec.dom.firstOrNull { "#${it.id}" == check.selector }?.by?.takeIf { it.isNotBlank() }?.let { out += it }
+                } else if (check.kind == Check.CALL) {
                     spec.files.firstOrNull { sf -> sf.exports.any { it.substringBefore('(').trim() == check.fn } }?.let { out += it.path }
                 } else out += "index.html"
             }

@@ -88,9 +88,10 @@ class InterviewBlueprintTest {
         assertTrue(f.problems.any { "tidak dikenal" in it })
     }
 
-    @Test fun cardsAreFlaggedWhenUnverified() {
-        assertTrue(Cards.factsFor(listOf("qibla"))[0].contains("BELUM TERVERIFIKASI"))
+    @Test fun verifiedCardsAreNotFlaggedAndCarryRequiredFunctions() {
+        assertFalse(Cards.factsFor(listOf("qibla"))[0].contains("BELUM TERVERIFIKASI"))
         assertFalse(Cards.factsFor(listOf("prayer-times"))[0].contains("BELUM TERVERIFIKASI"))
+        assertTrue(Cards.factsFor(listOf("prayer-times"))[0].contains("REQUIRED FUNCTIONS"))
         assertTrue(Cards.known("kartu:prayer-times"))
         assertFalse(Cards.known("x"))
     }

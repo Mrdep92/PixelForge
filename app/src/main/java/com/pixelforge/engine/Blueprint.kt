@@ -15,6 +15,7 @@ object Blueprint {
             " \"files\":[{\"path\":\"index.html\",\"features\":[\"F1\"],\"uses\":[\"js/app.js\"],\"exports\":[],\"cards\":[]},\n" +
             "           {\"path\":\"js/app.js\",\"features\":[\"F1\"],\"uses\":[],\"exports\":[\"functionName(arg1, arg2)\"],\"cards\":[\"prayer-times\"]}],\n" +
             " \"dom\":[{\"id\":\"prayer-list\",\"by\":\"js/app.js\"}],\n" +
+            " \"assets\":[\"asset-id\"],\n" +
             " \"facts\":[], \"decisions\":[\"short design decision\"],\n" +
             " \"tests\":[{\"kind\":\"exists\",\"label\":\"title shown\",\"selector\":\"h1\"},\n" +
             "          {\"kind\":\"text\",\"label\":\"...\",\"selector\":\"#out\",\"text\":\"...\"},\n" +
@@ -28,6 +29,9 @@ object Blueprint {
             "- \"cards\" lists knowledge card ids a file needs, taken ONLY from the catalog given. Never invent card ids. If a needed fact has no card, say so in decisions.\n" +
             "- No external libraries or CDNs. File paths in \"uses\" and in the code are relative (no leading slash).\n" +
             "- \"dom\": the elements index.html contains (empty) and the .js file that fills each. Every element JavaScript needs MUST be listed here. At most 15.\n" +
+            "- \"assets\": ids taken ONLY from the ASSET CATALOG (verified data files the app copies into the project). Any Arabic text (Quran, doa) MUST come from an asset; code never types Arabic. If no asset covers a religious text, do not include that text: show titles only or omit the feature.\n" +
+            "- \"dom\" items for elements that stay empty until the user acts get \"lazy\":true. All other listed elements are checked to be filled on load.\n" +
+            "- A knowledge card may add REQUIRED FUNCTIONS to the file that lists it; they are added to that file's exports automatically. Always list the card in the file that implements those functions.\n" +
             "- If a feature needs offline/PWA support, include sw.js and manifest.webmanifest as files. Never reference a file that is not in \"files\".\n" +
             "- \"tests\": 3-6 automatic checks derived from the acceptance criteria. kind is exists, text or call. A call test may only use a function listed in some file's exports.\n" +
             "- Set \"verified\":true ONLY when the expected value comes from a KNOWLEDGE CARD or the brief. Never guess expected values; if unsure, use an exists/text test instead.\n"
@@ -35,7 +39,7 @@ object Blueprint {
     private fun hasTests(reply: String): Boolean = Regex("\"tests\"\\s*:").containsMatchIn(reply)
 
     fun user(brief: String): String =
-        "BRIEF:\n$brief\nKNOWLEDGE CARD CATALOG:\n${Cards.catalog()}\n"
+        "BRIEF:\n$brief\nKNOWLEDGE CARD CATALOG:\n${Cards.catalog()}\nASSET CATALOG:\n${Assets.catalog()}\n"
 
     private fun isCutOff(problems: List<String>) =
         problems.any { it.contains("EOF", ignoreCase = true) || it.contains("End of input", ignoreCase = true) }
@@ -58,18 +62,19 @@ object Blueprint {
             when (val r = SpecParser.parse(reply)) {
                 is SpecResult.Err -> problems = listOf(r.message)
                 is SpecResult.Ok -> {
-                    problems = SpecValidator.validate(r.spec)
+                    val spec = Contracts.withCardExports(r.spec)
+                    problems = SpecValidator.validate(spec)
                     var plan: TestPlan? = null
                     if (problems.isEmpty() && hasTests(reply)) {
                         when (val p = PlanParser.parse(reply)) {
                             is PlanResult.Err -> problems = listOf("tests: " + p.message)
                             is PlanResult.Ok -> {
-                                problems = PlanValidator.validate(p.plan, r.spec).map { "tests: $it" }
+                                problems = PlanValidator.validate(p.plan, spec).map { "tests: $it" }
                                 plan = p.plan
                             }
                         }
                     }
-                    if (problems.isEmpty()) return BlueprintResult.Ok(r.spec, calls, plan)
+                    if (problems.isEmpty()) return BlueprintResult.Ok(spec, calls, Contracts.finalPlan(spec, plan))
                 }
             }
             if (attempt == maxRepairs) break

@@ -24,6 +24,8 @@ object Packet {
             "- Write only the file named in the ticket.\n" +
             "- Other files are known only through INTERFACES. Never invent functions, files or element ids that are not listed there.\n" +
             "- index.html owns the page structure. JavaScript only fills existing elements (document.getElementById) and never builds the page layout with document.body.appendChild.\n" +
+            "- base.css (global styles) is added automatically: it styles h1/h2, section (as cards), button, input, select, table, and the class \"arabic\" for Arabic text. Use semantic elements; write your own CSS only for extra rules.\n" +
+            "- Never type Arabic text (Quran, doa) in code. Religious text may only be read from an ASSET file listed in FACTS.\n" +
             "- Plain HTML, CSS and JavaScript. No external libraries or CDNs unless the ticket lists them.\n" +
             "- Use RELATIVE paths for every file reference (js/app.js, css/style.css), never a leading slash: the app is served from a sub-folder.\n" +
             "- If a fact, formula or value is not in FACTS, do not invent it: write a short TODO comment instead.\n" +
