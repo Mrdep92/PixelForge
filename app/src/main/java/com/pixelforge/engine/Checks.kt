@@ -164,15 +164,13 @@ object Checks {
                 }
             }
         }
-        if (ext == "html" || ext == "js") {
-            val htmlFiles = files.filterKeys { it.endsWith(".html") }
-            val jsFiles = files.filterKeys { it.endsWith(".js") }
-            if (htmlFiles.isNotEmpty() && jsFiles.isNotEmpty() && jsFiles.values.none { it.contains(".id =") || it.contains("setAttribute('id'") || it.contains("id=\"") }) {
-                val defined = htmlFiles.values.flatMap { h -> HTML_ID_DEF.findAll(h).map { it.groupValues[1] }.toList() }.toSet()
-                val used = jsFiles.values.flatMap { j ->
-                    DOM_ID_USE.findAll(j).map { it.groupValues[1].ifEmpty { it.groupValues[2] } }.toList()
-                }.toSet()
-                (used - defined).sorted().take(5).forEach { errors += "JavaScript memakai id elemen '$it' yang tidak ada di HTML." }
+        if (ext == "js" && ticket.domFill.isNotEmpty()) {
+            // Kontrak DOM: JS hanya boleh memakai id dari kontrak (atau id yang ia buat sendiri), bukan menebak isi index.html.
+            val own = Regex("""\.id\s*=\s*["']([\w-]+)["']|\bid=\\?["']([\w-]+)""").findAll(content)
+                .map { it.groupValues[1].ifEmpty { it.groupValues[2] } }.toSet()
+            val used = DOM_ID_USE.findAll(content).map { it.groupValues[1].ifEmpty { it.groupValues[2] } }.toSet()
+            (used - ticket.domFill.toSet() - own).sorted().take(5).forEach {
+                errors += "JavaScript memakai id elemen '$it' yang tidak ada di kontrak DOM. Id yang boleh dipakai: ${ticket.domFill.joinToString(", ")}."
             }
         }
         return errors

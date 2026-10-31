@@ -68,4 +68,13 @@ class AppChecksTest {
         assertTrue(Packet.user(t.first { it.file == "js/app.js" }, "id", null, emptyMap(), null).contains("ALREADY IN index.html"))
         assertTrue(Packet.user(t.first { it.file == "index.html" }, "id", null, emptyMap(), null).contains("MUST CONTAIN"))
     }
+
+    @Test fun ticketLevelJsMayOnlyUseContractIds() {
+        val t = TicketPlanner.plan(spec).first { it.file == "js/app.js" }
+        val paths = spec.files.map { it.path }
+        val bad = Checks.references(t, "function initApp(){ document.getElementById('doa-container'); }", emptyMap(), paths)
+        assertTrue(bad.any { it.contains("doa-container") && it.contains("times") })
+        val ok = Checks.references(t, "function initApp(){ document.getElementById('times'); document.getElementById('title'); }", emptyMap(), paths)
+        assertTrue(ok.none { it.contains("kontrak DOM") })
+    }
 }

@@ -236,8 +236,8 @@ class EngineFlow(
             log.append(Event(Event.RUN_STARTED, null, spec.name, 0, clock()))
             log.append(Event(Event.BLUEPRINT_APPROVED, null, spec.name, 0, clock()))
             // Mulai bersih: file sisa dari percobaan lama yang tidak ada di blueprint dihapus.
-            val keep = spec.files.map { it.path }.toSet()
-            store.all().keys.filter { it !in keep }.forEach { store.delete(it) }
+            // Run baru: semua sisa file lama dihapus, termasuk file yang namanya sama, karena akan dibuat ulang dari blueprint.
+            store.all().keys.forEach { store.delete(it) }
             set(state.copy(stage = Stage.RUNNING))
         }
         val runner = TicketRunner(llm, store, log, maxCalls, clock = clock)
