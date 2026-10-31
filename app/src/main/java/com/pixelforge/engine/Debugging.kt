@@ -21,14 +21,12 @@ object Implicated {
     fun files(failures: List<Failure>, plan: TestPlan, spec: AppSpec): List<String> {
         val paths = spec.files.map { it.path }
         val out = linkedSetOf<String>()
-        val byLabel = plan.checks.associateBy { it.label }
         fun byName(name: String) = paths.firstOrNull { it == name || it.substringAfterLast('/') == name }
         for (f in failures) {
             val m = f.message
             SRC.find(m)?.let { match -> byName(match.groupValues[1])?.let { out += it } }
             if (m.contains("404:") || m.contains("diblokir")) out += "index.html"
-            val label = m.substringBefore(':')
-            val check = byLabel[label]
+            val check = plan.checks.filter { m.startsWith(it.label + ":") }.maxByOrNull { it.label.length }
             if (check != null) {
                 if (check.kind == Check.NONEMPTY) {
                     spec.dom.firstOrNull { "#${it.id}" == check.selector }?.by?.takeIf { it.isNotBlank() }?.let { out += it }
