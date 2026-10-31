@@ -173,6 +173,18 @@ object Checks {
                 errors += "JavaScript memakai id elemen '$it' yang tidak ada di kontrak DOM. Id yang boleh dipakai: ${ticket.domFill.joinToString(", ")}."
             }
         }
+        if ((ext == "html" || ext == "js") && ticket.domFill.isEmpty()) {
+            // Tanpa kontrak DOM: cocokkan dengan HTML yang sudah ada.
+            val htmlFiles = files.filterKeys { it.endsWith(".html") }
+            val jsFiles = files.filterKeys { it.endsWith(".js") }
+            if (htmlFiles.isNotEmpty() && jsFiles.isNotEmpty() && jsFiles.values.none { it.contains(".id =") || it.contains("setAttribute('id'") || it.contains("id=\"") }) {
+                val defined = htmlFiles.values.flatMap { h -> HTML_ID_DEF.findAll(h).map { it.groupValues[1] }.toList() }.toSet()
+                val used = jsFiles.values.flatMap { j ->
+                    DOM_ID_USE.findAll(j).map { it.groupValues[1].ifEmpty { it.groupValues[2] } }.toList()
+                }.toSet()
+                (used - defined).sorted().take(5).forEach { errors += "JavaScript memakai id elemen '$it' yang tidak ada di HTML." }
+            }
+        }
         return errors
     }
 }
