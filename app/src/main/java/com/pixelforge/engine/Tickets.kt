@@ -10,7 +10,11 @@ data class Ticket(
     /** Tanda tangan file lain yang boleh dipakai (bukan isinya). */
     val interfaces: List<String>,
     val facts: List<String>,
-    val exports: List<String>
+    val exports: List<String>,
+    /** Id elemen yang harus dimuat file HTML ini (kosong, id persis). */
+    val domOwn: List<String> = emptyList(),
+    /** Id elemen yang sudah ada di index.html dan harus diisi file JS ini. */
+    val domFill: List<String> = emptyList()
 )
 
 object TicketPlanner {
@@ -40,7 +44,9 @@ object TicketPlanner {
                 val ex = spec.files.firstOrNull { it.path == u }?.exports.orEmpty()
                 if (ex.isEmpty()) u else "$u: " + ex.joinToString("; ")
             }
-            Ticket("T${i + 1}", f.path, f.uses, goal, accept, interfaces, Cards.factsFor(f.cards) + spec.facts, f.exports)
+            val own = if (f.path == "index.html") spec.dom.map { it.id } else emptyList()
+            val fill = spec.dom.filter { it.by == f.path }.map { it.id }
+            Ticket("T${i + 1}", f.path, f.uses, goal, accept, interfaces, Cards.factsFor(f.cards) + spec.facts, f.exports, own, fill)
         }
     }
 }

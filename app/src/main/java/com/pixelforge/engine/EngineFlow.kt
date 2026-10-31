@@ -50,6 +50,7 @@ class EngineFlow(
 
     companion object {
         const val MAX_DEBUG_ROUNDS = 2
+        const val MAX_STRUCT_ROUNDS = 2
 
         private val APPROVE = setOf("ya", "y", "ok", "oke", "setuju", "lanjut", "lanjutkan", "mulai", "gas", "siap", "betul", "sesuai", "yes")
 
@@ -267,6 +268,27 @@ class EngineFlow(
         var calls = startCalls
         var warnings: List<Failure> = emptyList()
         var tested = false
+
+        // Kecocokan antar file (kode, tanpa LLM): tag script otomatis, kontrak DOM, acuan file.
+        var structRound = 0
+        while (true) {
+            store.read("index.html")?.let { h ->
+                val injected = Assemble.injectAssets(h, spec)
+                if (injected != h) store.write("index.html", injected)
+            }
+            val issues = AppChecks.verify(spec, store.all())
+            if (issues.isEmpty()) break
+            if (structRound >= MAX_STRUCT_ROUNDS) return stuckIssues(issues, structRound)
+            structRound++
+            var fixed = false
+            for ((file, group) in issues.groupBy { it.file }.entries.take(3)) {
+                onProgress("Debugger merapikan $file (kecocokan antar file $structRound/$MAX_STRUCT_ROUNDS)")
+                val r = runner.repair(spec, file, group.map { it.message }, calls)
+                calls = r.calls
+                if (r.ok) fixed = true
+            }
+            if (!fixed) return stuckIssues(issues, structRound)
+        }
         if (sandbox != null) {
             var round = 0
             while (true) {
@@ -309,6 +331,15 @@ class EngineFlow(
         sb.append("\nFile tersimpan di folder project (tab Files).")
         return listOf(Say("TIKET", sb.toString()))
     }
+
+    private fun stuckIssues(issues: List<Issue>, rounds: Int): List<Say> = listOf(
+        Say(
+            "TIKET",
+            "File sudah dibuat tapi belum cocok satu sama lain (Debugger sudah mencoba $rounds kali):\n" +
+                issues.take(6).joinToString("\n") { "- ${it.file}: ${it.message}" } +
+                "\nPenggunaan kuota dihentikan di sini. Ketik **lanjut** untuk mencoba lagi, atau tulis revisi."
+        )
+    )
 
     private fun stuck(failures: List<Failure>, rounds: Int): List<Say> = listOf(
         Say(

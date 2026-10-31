@@ -24,8 +24,12 @@ data class AppSpec(
     val features: List<Feature>,
     val files: List<FileSpec>,
     val facts: List<String>,
-    val decisions: List<String>
+    val decisions: List<String>,
+    /** Kontrak DOM: elemen yang dimiliki index.html (kosong) dan file JS yang mengisinya. */
+    val dom: List<DomItem> = emptyList()
 )
+
+data class DomItem(val id: String, val by: String)
 
 sealed class SpecResult {
     data class Ok(val spec: AppSpec) : SpecResult()
@@ -76,7 +80,8 @@ object SpecParser {
                 features = features,
                 files = files,
                 facts = root.strList("facts"),
-                decisions = root.strList("decisions")
+                decisions = root.strList("decisions"),
+                dom = root.objList("dom").map { DomItem(it.str("id"), it.str("by")) }
             )
         )
     }
@@ -121,6 +126,11 @@ object SpecValidator {
             if (f.path in f.uses) errors += "${f.path} memakai dirinya sendiri."
             f.cards.filter { !Cards.known(it) }.forEach { errors += "${f.path} meminta kartu yang tidak dikenal: $it." }
         }
+        val domIds = spec.dom.map { it.id }
+        if (spec.dom.size > 25) errors += "Kontrak DOM terlalu panjang (${spec.dom.size}); maksimal 25."
+        domIds.filter { !Regex("^[A-Za-z][A-Za-z0-9_-]*$").matches(it) }.forEach { errors += "Id DOM tidak valid: '$it'." }
+        domIds.groupBy { it }.filter { it.value.size > 1 }.keys.forEach { errors += "Id DOM ganda: $it." }
+        spec.dom.filter { it.by.isNotBlank() && (it.by !in paths || !it.by.endsWith(".js")) }.forEach { errors += "Id DOM '${it.id}' diisi oleh file yang tidak ada/bukan .js: '${it.by}'." }
         val covered = spec.files.flatMap { it.features }.toSet()
         featureIds.filter { it.isNotBlank() && it !in covered }.forEach { errors += "Fitur $it tidak punya file." }
 
@@ -150,6 +160,11 @@ object SpecJson {
                     addProperty("path", f.path); add("features", arr(f.features)); add("exports", arr(f.exports))
                     add("uses", arr(f.uses)); add("cards", arr(f.cards))
                 })
+            }
+        })
+        root.add("dom", com.google.gson.JsonArray().apply {
+            spec.dom.forEach { d ->
+                add(com.google.gson.JsonObject().apply { addProperty("id", d.id); addProperty("by", d.by) })
             }
         })
         root.add("facts", arr(spec.facts))

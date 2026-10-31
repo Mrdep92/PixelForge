@@ -23,6 +23,7 @@ object Packet {
             "Rules:\n" +
             "- Write only the file named in the ticket.\n" +
             "- Other files are known only through INTERFACES. Never invent functions, files or element ids that are not listed there.\n" +
+            "- index.html owns the page structure. JavaScript only fills existing elements (document.getElementById) and never builds the page layout with document.body.appendChild.\n" +
             "- Plain HTML, CSS and JavaScript. No external libraries or CDNs unless the ticket lists them.\n" +
             "- Use RELATIVE paths for every file reference (js/app.js, css/style.css), never a leading slash: the app is served from a sub-folder.\n" +
             "- If a fact, formula or value is not in FACTS, do not invent it: write a short TODO comment instead.\n" +
@@ -48,6 +49,15 @@ object Packet {
             sb.append("INTERFACES (other files you may use):\n")
             ticket.interfaces.forEach { sb.append("- ").append(it).append('\n') }
             depOutlines.forEach { (p, o) -> if (o.isNotBlank()) sb.append("OUTLINE ").append(p).append(":\n").append(o).append('\n') }
+        }
+        if (ticket.domOwn.isNotEmpty()) {
+            sb.append("THIS HTML FILE MUST CONTAIN these elements, each EMPTY (no text, no children) with exactly this id: ")
+                .append(ticket.domOwn.joinToString(", ")).append('\n')
+            sb.append("Put static headings/labels around them. No inline <script> blocks; the app's own <script>/<link> tags are added automatically.\n")
+        }
+        if (ticket.domFill.isNotEmpty()) {
+            sb.append("ELEMENTS ALREADY IN index.html that this file must fill (use document.getElementById, never create them, never append to document.body): ")
+                .append(ticket.domFill.joinToString(", ")).append('\n')
         }
         if (ticket.facts.isNotEmpty()) {
             sb.append("FACTS (the only facts you may rely on):\n"); ticket.facts.forEach { sb.append("- ").append(it).append('\n') }
